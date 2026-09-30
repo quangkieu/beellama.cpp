@@ -27,6 +27,12 @@ set(CMAKE_WARN_UNUSED_CLI YES)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+if(DEFINED GGML_CUDA_ARCH)
+    message(FATAL_ERROR
+        "GGML_CUDA_ARCH is not a supported CMake option. "
+        "Use CMAKE_CUDA_ARCHITECTURES=120, or a semicolon-separated list such as CMAKE_CUDA_ARCHITECTURES=\"86;89;120\".")
+endif()
+
 if (NOT XCODE AND NOT MSVC AND NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
     set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -39,6 +45,12 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+# MSVC's 1 MiB default thread stack is insufficient for the recursive Meta
+# graph projection used by large tensor-parallel speculative KVarN graphs.
+if (MSVC)
+    add_link_options("$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:/STACK:16777216>")
+endif()
 
 if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LLAMA_STANDALONE ON)
@@ -83,6 +95,7 @@ if (WIN32)
 endif()
 
 if (MSVC)
+    add_compile_definitions(_USE_MATH_DEFINES)
     add_compile_options("$<$<COMPILE_LANGUAGE:C>:/utf-8>")
     add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
     add_compile_options("$<$<COMPILE_LANGUAGE:C>:/bigobj>")
@@ -155,6 +168,9 @@ if (NOT DEFINED LLAMA_BUILD_NUMBER)
 endif()
 if (NOT DEFINED LLAMA_BUILD_COMMIT)
     set(LLAMA_BUILD_COMMIT        ${BUILD_COMMIT})
+endif()
+if (NOT DEFINED LLAMA_BUILD_DIRTY)
+    set(LLAMA_BUILD_DIRTY         ${BUILD_DIRTY})
 endif()
 
 # override ggml options

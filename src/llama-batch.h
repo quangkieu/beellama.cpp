@@ -129,7 +129,7 @@ struct llama_batch_ext {
 // a helper for sanitizing, fulfilling and splitting a batch
 class llama_batch_allocr {
 public:
-    llama_batch_allocr(uint32_t n_pos_per_embd);
+    llama_batch_allocr(uint32_t n_pos_per_embd, bool allow_sparse_positions = false);
 
     // convert a llama_batch_ext to internal llama_batch and sanitize it
     bool init(
@@ -186,6 +186,7 @@ private:
     // TODO: this is more of a temporary solution until we have a better way to handle multiple positions per token/embd
     //       ref: https://github.com/ggml-org/llama.cpp/issues/13694#issuecomment-2983871762
     const uint32_t n_pos_per_embd;
+    const bool allow_sparse_positions;
 
     uint32_t n_embd;
     uint32_t n_seq_max;

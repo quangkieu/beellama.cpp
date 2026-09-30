@@ -45,14 +45,35 @@ static constexpr __device__ vec_dot_q_cuda_t get_vec_dot_q_cuda(ggml_type type) 
         case GGML_TYPE_Q4_1:    return vec_dot_q4_1_q8_1;
         case GGML_TYPE_Q5_0:    return vec_dot_q5_0_q8_1;
         case GGML_TYPE_Q5_1:    return vec_dot_q5_1_q8_1;
+        case GGML_TYPE_Q6_0:    return vec_dot_q6_0_q8_1;
+        case GGML_TYPE_Q6_1:    return vec_dot_q6_1_q8_1;
+        case GGML_TYPE_Q3_0:    return vec_dot_q3_0_q8_1;
+        case GGML_TYPE_Q3_1:    return vec_dot_q3_1_q8_1;
+        case GGML_TYPE_Q2_0S:    return vec_dot_q2_0s_q8_1;
+        case GGML_TYPE_Q2_1:    return vec_dot_q2_1_q8_1;
         case GGML_TYPE_Q8_0:    return vec_dot_q8_0_q8_1;
         case GGML_TYPE_MXFP4:   return vec_dot_mxfp4_q8_1;
         case GGML_TYPE_NVFP4:   return vec_dot_nvfp4_q8_1;
         case GGML_TYPE_Q2_K:    return vec_dot_q2_K_q8_1;
         case GGML_TYPE_Q3_K:    return vec_dot_q3_K_q8_1;
-        case GGML_TYPE_Q4_K:    return vec_dot_q4_K_q8_1;
-        case GGML_TYPE_Q5_K:    return vec_dot_q5_K_q8_1;
-        case GGML_TYPE_Q6_K:    return vec_dot_q6_K_q8_1;
+        case GGML_TYPE_Q4_K:
+#if defined(RDNA3_0) || defined(RDNA3_5) || defined(RDNA4)
+            return vec_dot_q4_K_q8_1_vdr4;
+#else
+            return vec_dot_q4_K_q8_1;
+#endif
+        case GGML_TYPE_Q5_K:
+#if defined(RDNA3_0) || defined(RDNA3_5) || defined(RDNA4)
+            return vec_dot_q5_K_q8_1_vdr4;
+#else
+            return vec_dot_q5_K_q8_1;
+#endif
+        case GGML_TYPE_Q6_K:
+#if defined(RDNA3_0) || defined(RDNA3_5) || defined(RDNA4)
+            return vec_dot_q6_K_q8_1_vdr2;
+#else
+            return vec_dot_q6_K_q8_1;
+#endif
         case GGML_TYPE_IQ2_XXS: return vec_dot_iq2_xxs_q8_1;
         case GGML_TYPE_IQ2_XS:  return vec_dot_iq2_xs_q8_1;
         case GGML_TYPE_IQ2_S:   return vec_dot_iq2_s_q8_1;
@@ -74,6 +95,12 @@ static constexpr __host__ __device__ int get_vdr_mmvq(ggml_type type) {
         case GGML_TYPE_Q4_1:    return VDR_Q4_1_Q8_1_MMVQ;
         case GGML_TYPE_Q5_0:    return VDR_Q5_0_Q8_1_MMVQ;
         case GGML_TYPE_Q5_1:    return VDR_Q5_1_Q8_1_MMVQ;
+        case GGML_TYPE_Q6_0:    return VDR_Q6_0_Q8_1_MMVQ;
+        case GGML_TYPE_Q6_1:    return VDR_Q6_1_Q8_1_MMVQ;
+        case GGML_TYPE_Q3_0:    return VDR_Q3_0_Q8_1_MMVQ;
+        case GGML_TYPE_Q3_1:    return VDR_Q3_1_Q8_1_MMVQ;
+        case GGML_TYPE_Q2_0S:    return VDR_Q2_0_Q8_1_MMVQ;
+        case GGML_TYPE_Q2_1:    return VDR_Q2_1_Q8_1_MMVQ;
         case GGML_TYPE_Q8_0:    return VDR_Q8_0_Q8_1_MMVQ;
         case GGML_TYPE_MXFP4:   return VDR_MXFP4_Q8_1_MMVQ;
         case GGML_TYPE_NVFP4:   return VDR_NVFP4_Q8_1_MMVQ;
@@ -99,6 +126,7 @@ enum mmvq_parameter_table_id {
     MMVQ_PARAMETERS_GCN,
     MMVQ_PARAMETERS_RDNA2,
     MMVQ_PARAMETERS_RDNA3_0,
+    MMVQ_PARAMETERS_RDNA3_5,
     MMVQ_PARAMETERS_RDNA4,
     MMVQ_PARAMETERS_GB10
 };
@@ -108,7 +136,9 @@ static constexpr __device__ mmvq_parameter_table_id get_device_table_id() {
     return MMVQ_PARAMETERS_RDNA4;
 #elif defined(RDNA3_0)
     return MMVQ_PARAMETERS_RDNA3_0;
-#elif defined(RDNA2) || defined(RDNA3_5)
+#elif defined(RDNA3_5)
+    return MMVQ_PARAMETERS_RDNA3_5;
+#elif defined(RDNA2)
     return MMVQ_PARAMETERS_RDNA2;
 #elif defined(GCN) || defined(CDNA)
     return MMVQ_PARAMETERS_GCN;
@@ -128,7 +158,10 @@ static __host__ mmvq_parameter_table_id get_device_table_id(int cc) {
     if (GGML_CUDA_CC_IS_RDNA3_0(cc)) {
         return MMVQ_PARAMETERS_RDNA3_0;
     }
-    if (GGML_CUDA_CC_IS_RDNA2(cc) || GGML_CUDA_CC_IS_RDNA3_5(cc)) {
+    if (GGML_CUDA_CC_IS_RDNA3_5(cc)) {
+        return MMVQ_PARAMETERS_RDNA3_5;
+    }
+    if (GGML_CUDA_CC_IS_RDNA2(cc)) {
         return MMVQ_PARAMETERS_RDNA2;
     }
     if (GGML_CUDA_CC_IS_GCN(cc) || GGML_CUDA_CC_IS_CDNA(cc)) {
@@ -167,6 +200,12 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_pascal_older(gg
         case GGML_TYPE_Q4_K:    return 5;
         case GGML_TYPE_Q5_0:    return 6;
         case GGML_TYPE_Q5_1:    return 6;
+        case GGML_TYPE_Q6_0:    return 5;
+        case GGML_TYPE_Q6_1:    return 5;
+        case GGML_TYPE_Q3_0:    return 5;
+        case GGML_TYPE_Q3_1:    return 5;
+        case GGML_TYPE_Q2_0S:    return 5;
+        case GGML_TYPE_Q2_1:    return 5;
         case GGML_TYPE_Q5_K:    return 5;
         case GGML_TYPE_Q6_K:    return 4;
         case GGML_TYPE_Q8_0:    return 4;
@@ -271,9 +310,15 @@ static constexpr __host__ __device__ int get_mmvq_mmid_max_batch_rdna4(ggml_type
         case GGML_TYPE_Q3_K:    return 4;
         case GGML_TYPE_Q4_0:    return 7;
         case GGML_TYPE_Q4_1:    return 7;
-        case GGML_TYPE_Q4_K:    return 4;
+        case GGML_TYPE_Q4_K:    return 7;
         case GGML_TYPE_Q5_0:    return 7;
         case GGML_TYPE_Q5_1:    return 7;
+        case GGML_TYPE_Q6_0:    return 6;
+        case GGML_TYPE_Q6_1:    return 6;
+        case GGML_TYPE_Q3_0:    return 6;
+        case GGML_TYPE_Q3_1:    return 6;
+        case GGML_TYPE_Q2_0S:    return 6;
+        case GGML_TYPE_Q2_1:    return 6;
         case GGML_TYPE_Q5_K:    return 5;
         case GGML_TYPE_Q6_K:    return 5;
         case GGML_TYPE_Q8_0:    return 7;
@@ -490,6 +535,7 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
                 case GGML_TYPE_Q4_1:
                 case GGML_TYPE_Q5_0:
                 case GGML_TYPE_Q5_1:
+                case GGML_TYPE_Q6_0:
                 case GGML_TYPE_Q8_0:
                 case GGML_TYPE_Q2_K:
                 case GGML_TYPE_Q4_K:
@@ -513,12 +559,31 @@ static constexpr __host__ __device__ int calc_nwarps(ggml_type type, int ncols_d
                 case GGML_TYPE_Q4_1:
                 case GGML_TYPE_Q5_0:
                 case GGML_TYPE_Q5_1:
+                case GGML_TYPE_Q6_0:
                 case GGML_TYPE_Q8_0:
                     return 8;
                 case GGML_TYPE_Q6_K:
                     return 2;
                 case GGML_TYPE_IQ4_NL:
                     return 8;
+                default:
+                    return 1;
+            }
+        }
+        return 1;
+    }
+    if (table_id == MMVQ_PARAMETERS_RDNA3_5) {
+        // gfx1151 (Strix Halo iGPU): nwarps=1 (the RDNA2 table) underutilizes the
+        // wave32 datapath on the large-K decode matmuls; nwarps=8 (the RDNA3_0
+        // table) over-parallelizes the small ones. Swept 2025-08: nwarps=2 wins
+        // (~+0.6% decode on Qwen3.6-35B-A3B Q8_0), nwarps=4 regresses.
+        // Apply to the whole mmvq range (ncols_dst 1..8), not just decode: the
+        // speculative verify batch (n_draft+1 tokens) must use the same nwarps
+        // as decode so its per-row dot-product accumulation is bit-identical.
+        if (ncols_dst <= MMVQ_MAX_BATCH_SIZE) {
+            switch (type) {
+                case GGML_TYPE_Q8_0:
+                    return 2;
                 default:
                     return 1;
             }
@@ -1306,6 +1371,42 @@ static void mul_mat_vec_q_switch_type(
             break;
         case GGML_TYPE_Q5_1:
             mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q5_1>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q6_0:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q6_0>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q6_1:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q6_1>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q3_0:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q3_0>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q3_1:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q3_1>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q2_0S:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q2_0S>
+                (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
+                 nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
+                 nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);
+            break;
+        case GGML_TYPE_Q2_1:
+            mul_mat_vec_q_switch_ncols_dst<GGML_TYPE_Q2_1>
                 (vx, vy, ids, fusion, dst, ncols_x, nrows_x, ncols_dst, stride_row_x, stride_col_y, stride_col_dst,
                  nchannels_x, nchannels_y, nchannels_dst, stride_channel_x, stride_channel_y, stride_channel_dst,
                  nsamples_x, nsamples_dst, stride_sample_x, stride_sample_y, stride_sample_dst, ids_stride, stream);

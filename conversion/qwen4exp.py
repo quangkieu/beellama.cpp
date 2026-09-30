@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, cast
+from typing import Callable, Iterable, cast
 
 import torch
 from torch import Tensor
@@ -25,9 +25,24 @@ class Qwen4ExpTextModel(_Qwen35MRopeMixin, _LinearAttentionVReorderBase):
 
     model_arch = gguf.MODEL_ARCH.QWEN4EXP
 
-    # the MTP block is a separate draft head; vLLM drops it too
-    supports_mtp_export = False
-    no_mtp = True
+    _MTP_MIXER_PREFIX = "mtp.hyper_connection_mixer."
+
+    @classmethod
+    def filter_tensors(
+        cls, item: tuple[str, Callable[[], Tensor]]
+    ) -> tuple[str, Callable[[], Tensor]] | None:
+        # The MTP head carries its own copy of the trunk's output mixer. It is
+        # unindexed in the checkpoint but belongs to the trailing draft block.
+        name, gen = item
+        if name.startswith("model." + cls._MTP_MIXER_PREFIX):
+            name = name.replace("model.", "", 1)
+        if name.startswith(cls._MTP_MIXER_PREFIX):
+            if cls.no_mtp:
+                return None
+            assert cls._original_block_count is not None
+            suffix = name[len("mtp."):]
+            return f"model.layers.{cls._original_block_count}.{suffix}", gen
+        return super().filter_tensors((name, gen))
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -66,6 +81,10 @@ class Qwen4ExpTextModel(_Qwen35MRopeMixin, _LinearAttentionVReorderBase):
         self.gguf_writer.add_attention_compress_ratios(
             [ratio if layer_types[i] == "full_attention" else 0 for i in range(n_layer)]
         )
+
+        # MTP-only sidecars contain no trunk PLE tensors or constants.
+        if self.mtp_only:
+            return
 
         # ple_layer_ids is 1-based in the HF config; empty means no n-gram table,
         # so emit no PLE keys rather than optional ones

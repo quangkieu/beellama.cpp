@@ -76,6 +76,9 @@ struct llm_build_delta_net_base : public llm_graph_context {
                 ggml_tensor * s,
                         int   il);
 
+    // Carry the older recurrent snapshots across short decode batches.
+    void build_rs_history(llm_graph_input_rs * inp, ggml_tensor * states_all, int64_t state_size, int64_t n_written);
+
     // read conv state from cache, concat with qkv_mixed, write back (single slot or per-token)
     // qkv_mixed: (qkv_dim, n_seq_tokens, n_seqs); returns conv_input: (kernel_size + n_seq_tokens - 1, channels, n_seqs)
     ggml_tensor * build_conv_state(
@@ -1149,6 +1152,7 @@ struct llama_model_deepseek2 : public llama_model_base {
     llama_model_deepseek2(const struct llama_model_params & params) : llama_model_base(params) {}
     void load_arch_hparams(llama_model_loader & ml) override;
     void load_arch_tensors(llama_model_loader & ml) override;
+    bool graph_consumes_exact_kv_tail() const override;
 
     struct graph : public llm_graph_context {
         graph(const llama_model & model, const llm_graph_params & params);
@@ -1195,6 +1199,7 @@ struct llama_model_deepseek4 : public llama_model_base {
     llama_model_deepseek4(const struct llama_model_params & params) : llama_model_base(params) {}
     void load_arch_hparams(llama_model_loader & ml) override;
     void load_arch_tensors(llama_model_loader & ml) override;
+    bool graph_consumes_exact_kv_tail() const override;
 
     struct graph : public llm_graph_context {
         graph(const llm_graph_params & params) : llm_graph_context(params) {}
@@ -1290,6 +1295,10 @@ struct llama_model_deepseek4 : public llama_model_base {
                 ggml_tensor * inp_pos,
                 ggml_tensor * sinks,
                 float kq_scale,
+                int il) const;
+
+        ggml_tensor * build_raw_tail(
+                llm_graph_input_dsv4_raw * inp_attn,
                 int il) const;
 
         ggml_tensor * build_hca_attention(
@@ -2389,7 +2398,10 @@ struct llama_model_qwen4exp : public llama_model_base {
 
     struct graph : public llm_build_delta_net_base {
         graph(const llama_model & model, const llm_graph_params & params);
-    private:
+    protected:
+        // members only, no trunk: graph_mtp builds its own single block
+        graph(const llama_model & model, const llm_graph_params & params, bool mtp);
+
         // HC replaces every layer norm: residual is [n_embd, hc, n_tokens]
         ggml_tensor * build_hc_mix(
                     ggml_tensor * x,
@@ -2465,7 +2477,7 @@ struct llama_model_qwen4exp : public llama_model_base {
                             int   il);
 
         ggml_tensor * build_inp_ple(
-  const llama_memory_hybrid_idx_context * mctx_hyb);
+      const llama_memory_hybrid_context * mctx_hyb);
 
         ggml_tensor * build_ple(
              llm_graph_input_rs * inp,
@@ -2479,6 +2491,10 @@ struct llama_model_qwen4exp : public llama_model_base {
                             int   il);
 
         const llama_model & model;
+    };
+
+    struct graph_mtp : public graph {
+        graph_mtp(const llama_model & model, const llm_graph_params & params);
     };
 
     std::unique_ptr<llm_graph_context> build_arch_graph(const llm_graph_params & params) const override;

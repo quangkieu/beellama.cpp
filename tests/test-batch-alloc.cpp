@@ -28,6 +28,8 @@ struct mock_memory : public llama_memory_i {
     void clear(bool) override { GGML_ASSERT(false && "not implemented"); }
 
     bool seq_rm  (llama_seq_id, llama_pos, llama_pos) override { GGML_ASSERT(false && "not implemented"); }
+    bool seq_rm_cell(llama_seq_id, uint32_t) override { GGML_ASSERT(false && "not implemented"); }
+    int cells_at_pos(llama_seq_id, llama_pos, uint32_t *, int) override { GGML_ASSERT(false && "not implemented"); }
     void seq_cp  (llama_seq_id, llama_seq_id, llama_pos, llama_pos) override { GGML_ASSERT(false && "not implemented"); }
     void seq_keep(llama_seq_id) override { GGML_ASSERT(false && "not implemented"); }
     void seq_add (llama_seq_id, llama_pos, llama_pos, llama_pos) override { GGML_ASSERT(false && "not implemented"); }
@@ -1042,6 +1044,35 @@ static void test_mtp_embd_width(testing & t) {
     });
 }
 
+static void test_dflash_positions(testing & t) {
+    llama_vocab vocab;
+    mock_memory mem;
+    mem.ranges[0] = {0, 4};
+
+    t.test("scalar_image_overlap_and_text_gap", [&](testing & t) {
+        llama_batch_allocr draft(1, true);
+        llama_batch_allocr ordinary(1);
+        batch_builder image;
+        image.add(4, {0}, false);
+        image.add(4, {0}, false);
+        t.assert_true(draft.init(image.make(), vocab, &mem, 2, 1, true));
+        auto ub = draft.split_simple(2);
+        t.assert_equal(1u, ub.n_pos);
+        t.assert_equal(4, ub.pos[0]);
+        t.assert_equal(4, ub.pos[1]);
+        t.assert_true(!ordinary.init(image.make(), vocab, &mem, 2, 1, true));
+
+        batch_builder after_image;
+        after_image.add(36, {0}, true);
+        t.assert_true(draft.init(after_image.make(), vocab, &mem, 2, 1, true));
+        t.assert_true(!ordinary.init(after_image.make(), vocab, &mem, 2, 1, true));
+
+        batch_builder backwards;
+        backwards.add(3, {0}, true);
+        t.assert_true(!draft.init(backwards.make(), vocab, &mem, 2, 1, true));
+    });
+}
+
 int main(int argc, char ** argv) {
     testing t;
 
@@ -1063,6 +1094,7 @@ int main(int argc, char ** argv) {
     t.test("split",          test_split);
     t.test("keep_tail",      test_keep_tail);
     t.test("mrope",          test_mrope);
+    t.test("dflash",         test_dflash_positions);
     t.test("mtp_embd_width", test_mtp_embd_width);
 
     return t.summary();

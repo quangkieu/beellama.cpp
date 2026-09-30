@@ -158,7 +158,43 @@ void llama_memory_recurrent::clear(bool data) {
     std::fill(rs_idx.begin(), rs_idx.end(), 0);
 }
 
+bool llama_memory_recurrent::can_seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) const {
+    if (p0 < 0) {
+        p0 = 0;
+    }
+    if (p1 < 0) {
+        p1 = std::numeric_limits<llama_pos>::max();
+    }
+
+    if (seq_id >= int64_t(size)) {
+        return false;
+    }
+    if (seq_id < 0) {
+        // A negative sequence selector can remove either the complete memory
+        // or an empty range, matching seq_rm()'s mutation contract.
+        return p0 == p1 || (p0 == 0 && p1 == std::numeric_limits<llama_pos>::max());
+    }
+
+    const int32_t tail_id = cells[seq_id].tail;
+    if (tail_id < 0) {
+        return true;
+    }
+    const auto & cell = cells[tail_id];
+    if (0 < p0 && p0 <= cell.pos && p1 > cell.pos) {
+        const llama_pos rollback = cell.pos - (p0 - 1);
+        // A recurrent snapshot rollback is consumed by the next graph input.
+        // Until then, a second partial rollback cannot be represented and
+        // must be rejected during planning, before mutation starts.
+        return rs_idx[seq_id] == 0 && rollback >= 1 && rollback <= llama_pos(n_rs_seq);
+    }
+    return true;
+}
+
 bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) {
+    if (!can_seq_rm(seq_id, p0, p1)) {
+        return false;
+    }
+
     uint32_t new_head = size;
 
     if (p0 < 0) {
@@ -169,7 +205,7 @@ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos
         p1 = std::numeric_limits<llama_pos>::max();
     }
 
-    if ((uint32_t) seq_id >= this->n_seq_max) {
+    if (seq_id >= 0 && (uint32_t) seq_id >= this->n_seq_max) {
         LLAMA_LOG_ERROR("%s: invalid seq_id (%d) - larger than n_seq_max (%d)\n", __func__, seq_id, this->n_seq_max);
         return false;
     }
@@ -244,6 +280,54 @@ bool llama_memory_recurrent::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos
     }
 
     return true;
+}
+
+bool llama_memory_recurrent::seq_rm_cell(llama_seq_id seq_id, uint32_t cell_idx) {
+    if (seq_id < 0 || cell_idx >= size) {
+        return false;
+    }
+
+    auto & cell = cells[cell_idx];
+    if (!cell.has_seq_id(seq_id)) {
+        return false;
+    }
+
+    cell.seq_id.erase(seq_id);
+    if (cell.is_empty()) {
+        if (cell.pos >= 0) {
+            used--;
+        }
+        cell.pos = -1;
+        cell.src = -1;
+        if (cell_idx < head) {
+            head = cell_idx;
+        }
+    }
+
+    if ((uint32_t) seq_id < size && cells[seq_id].tail == (int32_t) cell_idx) {
+        cells[seq_id].tail = -1;
+    }
+
+    return true;
+}
+
+int llama_memory_recurrent::cells_at_pos(
+        llama_seq_id seq_id,
+        llama_pos pos,
+        uint32_t * cell_indices,
+        int n_max) {
+    int count = 0;
+    for (uint32_t i = 0; i < size; ++i) {
+        const auto & cell = cells[i];
+        if (cell.pos != pos || !cell.has_seq_id(seq_id)) {
+            continue;
+        }
+        if (cell_indices != nullptr && count < n_max) {
+            cell_indices[count] = i;
+        }
+        ++count;
+    }
+    return count;
 }
 
 void llama_memory_recurrent::seq_cp(llama_seq_id seq_id_src, llama_seq_id seq_id_dst, llama_pos p0, llama_pos p1) {
@@ -718,6 +802,14 @@ bool llama_memory_recurrent::get_can_shift() const {
     return true;
 }
 
+llama_memory_i::seq_rm_capability llama_memory_recurrent::get_seq_rm_capability() const {
+    return {
+        /* .full_clear = */ true,
+        /* .arbitrary_ranges = */ false,
+        /* .suffix_rollback_tokens = */ n_rs_seq,
+    };
+}
+
 size_t llama_memory_recurrent::total_size() const {
     size_t size = 0;
     for (const auto & [_, buf] : ctxs_bufs) {
@@ -850,29 +942,70 @@ void llama_memory_recurrent::state_read(llama_io_read_i & io, llama_seq_id seq_i
     uint32_t cell_count;
     io.read(&cell_count, sizeof(cell_count));
 
-    bool res = true;
+    const uint32_t old_head = head;
+    const uint32_t old_used = used;
+    const int32_t old_rs_z = rs_z;
+    auto old_cells = cells;
+    auto old_rs_idx = rs_idx;
 
-    // save the head of the restored cells - could be needed to clear the state
-    // the head is valid only when state_read_meta() succeeded
-    const bool meta_read = state_read_meta(io, cell_count, seq_id);
-    const uint32_t cell_head = head;
+    bool res = false;
+    try {
+        res = state_read_meta(io, cell_count, seq_id);
+    } catch (...) {
+        head = old_head;
+        used = old_used;
+        rs_z = old_rs_z;
+        cells = std::move(old_cells);
+        rs_idx = std::move(old_rs_idx);
+        throw;
+    }
 
-    res = res && meta_read;
+    if (res && n_rs_seq != 0) {
+        if (seq_id == -1) {
+            std::fill(rs_idx.begin(), rs_idx.end(), 0);
+        } else {
+            set_rs_idx(seq_id, 0);
+        }
+    }
+
+    const uint32_t restore_head = head;
+    const uint32_t new_head = head;
+    const uint32_t new_used = used;
+    const int32_t new_rs_z = rs_z;
+    auto new_cells = cells;
+    auto new_rs_idx = rs_idx;
+
+    // Parsing and destination selection must not mutate the live cache. The
+    // host/device IO implementations already stage tensor writes, so stage the
+    // matching recurrent metadata on the same commit boundary.
+    head = old_head;
+    used = old_used;
+    rs_z = old_rs_z;
+    cells = std::move(old_cells);
+    rs_idx = std::move(old_rs_idx);
 
     try {
-        res = res && state_read_data(io, cell_count);
+        res = res && state_read_data(io, cell_count, restore_head);
     } catch (...) {
         res = false;
     }
 
     if (!res) {
-        state_clear(seq_id, cell_head, meta_read ? cell_count : 0);
         throw std::runtime_error("failed to restore kv cache");
     }
 
-    if (n_rs_seq != 0) {
-        set_rs_idx(seq_id, 0);
-    }
+    io.on_commit([this,
+                  new_head,
+                  new_used,
+                  new_rs_z,
+                  new_cells = std::move(new_cells),
+                  new_rs_idx = std::move(new_rs_idx)]() mutable {
+        head = new_head;
+        used = new_used;
+        rs_z = new_rs_z;
+        cells = std::move(new_cells);
+        rs_idx = std::move(new_rs_idx);
+    });
 }
 
 void llama_memory_recurrent::state_write_meta(llama_io_write_i & io, const std::vector<std::pair<uint32_t, uint32_t>> & cell_ranges, llama_seq_id seq_id) const {
@@ -1044,7 +1177,9 @@ bool llama_memory_recurrent::state_read_meta(llama_io_read_i & io, uint32_t cell
             return false;
         }
 
-        clear(true);
+        // Tensor payloads are installed by the IO transaction. Clearing data
+        // here would make prepare destructive before commit.
+        clear(false);
 
         for (uint32_t i = 0; i < cell_count; ++i) {
             auto & cell = cells[i];
@@ -1090,7 +1225,7 @@ bool llama_memory_recurrent::state_read_meta(llama_io_read_i & io, uint32_t cell
     return true;
 }
 
-bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell_count) {
+bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell_count, uint32_t restore_head) {
     uint32_t s_trans;
     uint32_t n_layer;
     io.read(&s_trans, sizeof(s_trans));
@@ -1134,7 +1269,7 @@ bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell
 
         if (cell_count) {
             // Read and set the keys for the whole cell range
-            io.read_tensor(r_l[il], head * r_size_row, cell_count * r_size_row);
+            io.read_tensor(r_l[il], restore_head * r_size_row, cell_count * r_size_row);
         }
 
         if (p_l[il] != nullptr) {
@@ -1147,7 +1282,7 @@ bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell
             }
 
             if (cell_count) {
-                io.read_tensor(p_l[il], head * p_size_row, cell_count * p_size_row);
+                io.read_tensor(p_l[il], restore_head * p_size_row, cell_count * p_size_row);
             }
         }
     }
@@ -1178,7 +1313,7 @@ bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell
 
             if (cell_count) {
                 // Read and set the values for the whole cell range
-                io.read_tensor(s_l[il], head * s_size_row, cell_count * s_size_row);
+                io.read_tensor(s_l[il], restore_head * s_size_row, cell_count * s_size_row);
             }
         }
     } else {
@@ -1218,7 +1353,7 @@ bool llama_memory_recurrent::state_read_data(llama_io_read_i & io, uint32_t cell
             if (cell_count) {
                 // For each row in the transposed matrix, read the values for the whole cell range
                 for (uint32_t j = 0; j < n_embd_s; ++j) {
-                    const size_t dst_offset = (head + j * size) * s_size_el;
+                    const size_t dst_offset = (restore_head + j * size) * s_size_el;
                     io.read_tensor(s_l[il], dst_offset, cell_count * s_size_el);
                 }
             }
@@ -1319,6 +1454,10 @@ uint32_t llama_memory_recurrent_context::get_n_rs() const {
     return is_full ? mem->size : mem->n;
 }
 
+uint32_t llama_memory_recurrent_context::get_n_rs_seq() const {
+    return mem->n_rs_seq;
+}
+
 uint32_t llama_memory_recurrent_context::get_head() const {
     return is_full ? 0 : mem->head;
 }
@@ -1341,6 +1480,22 @@ ggml_tensor * llama_memory_recurrent_context::get_s_l(int32_t il) const {
 
 ggml_tensor * llama_memory_recurrent_context::get_p_l(int32_t il) const {
     return mem->p_l[il];
+}
+
+int32_t llama_memory_recurrent_context::s_history(int i, uint32_t age) const {
+    const uint32_t cell_idx = i + mem->head;
+    const auto & cell = mem->cells[cell_idx];
+    uint32_t idx = 0;
+    if (!cell.seq_id.empty()) {
+        const llama_seq_id seq = *cell.seq_id.begin();
+        if (seq >= 0 && (size_t) seq < mem->rs_idx.size()) {
+            idx = mem->rs_idx[seq];
+        }
+    }
+    // Older snapshots beyond the physical reserve are not used for rollback.
+    // Keep the read in bounds while the newest snapshots refill after replay.
+    idx = std::min(mem->n_rs_seq, idx + age);
+    return (int32_t)(idx * mem->size) + cell.src0;
 }
 
 int32_t llama_memory_recurrent_context::s_copy(int i) const {

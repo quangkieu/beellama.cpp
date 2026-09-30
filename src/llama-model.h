@@ -232,6 +232,11 @@ struct llama_layer_nextn {
     struct ggml_tensor * shared_head_head_s    = nullptr;
     struct ggml_tensor * shared_head_head_in_s = nullptr;
     struct ggml_tensor * shared_head_norm      = nullptr;
+
+    // Qwen4Exp MTP head output mixer.
+    struct ggml_tensor * hc_head_norm = nullptr;
+    struct ggml_tensor * hc_head_down = nullptr;
+    struct ggml_tensor * hc_head_up   = nullptr;
 };
 
 struct llama_layer_switch_lora {
@@ -752,6 +757,15 @@ struct llama_model {
 
     uint32_t n_gpu_layers() const;
     llama_split_mode split_mode() const;
+
+    // Static model-graph declaration consumed by KV memory planning. K-only
+    // MLA/DSA graphs do not currently compose the standard exact-tail overlay.
+    virtual bool graph_consumes_exact_kv_tail() const;
+
+    // Per-layer contract used by KV route construction. This is derived from
+    // the same loaded tensors that the model graph uses to build self-attention
+    // bias, including layer-zero fallback tensors such as T5 relative bias.
+    bool self_attention_uses_explicit_bias(uint32_t il) const;
 
     std::map<ggml_backend_buffer_type_t, size_t> memory_breakdown() const;
 

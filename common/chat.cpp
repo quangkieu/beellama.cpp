@@ -902,12 +902,42 @@ common_reasoning_format common_reasoning_format_from_name(const std::string & fo
     throw std::runtime_error("Unknown reasoning format: " + format);
 }
 
+// The prompt parts mirror the rendered prompt string (their concatenation
+// equals the prompt). These helpers edit the parts consistently with the
+// prompt, even when the edited text spans two adjacent parts.
+
+// Erase [pos, pos + len) from the concatenation of parts.
+// Returns false if the range is not fully covered by the parts.
+static bool string_parts_erase_range(std::vector<jinja::string_part> & parts, size_t pos, size_t len) {
+    size_t total = 0;
+    for (const auto & part : parts) {
+        total += part.val.size();
+    }
+    if (pos + len > total) {
+        return false;
+    }
+    size_t off     = 0;
+    size_t to_drop = len;
+    for (auto & part : parts) {
+        const size_t sz = part.val.size();
+        if (off + sz > pos && to_drop > 0) {
+            const size_t skip = pos > off ? pos - off : 0;
+            const size_t drop = std::min(to_drop, sz - skip);
+            part.val.erase(skip, drop);
+            to_drop -= drop;
+        }
+        off += sz;
+    }
+    return to_drop == 0;
+}
+
 std::string common_chat_template_direct_apply_impl(
     const common_chat_template & tmpl,
     const autoparser::generation_params & inputs,
     const std::optional<json> & messages_override,
     const std::optional<json> & tools_override,
-    const std::optional<json> & additional_context) {
+    const std::optional<json> & additional_context,
+    std::vector<jinja::string_part> * out_parts) {
     jinja::context ctx(tmpl.source());
 
     // messages_override is already built for this template, do not touch its content parts
@@ -953,22 +983,133 @@ std::string common_chat_template_direct_apply_impl(
     const jinja::value results = runtime.execute(tmpl.prog);
     auto parts = jinja::runtime::gather_string_parts(results);
 
+    // Preserve the jinja::string parts (with is_input metadata) for the caller
+    if (out_parts) {
+        *out_parts = parts->as_string().parts;
+    }
+
     std::string result = parts->as_string().str();
 
     // TODO: improve this later
     if (inputs.add_bos && string_starts_with(result, tmpl.bos_token())) {
         result = result.substr(tmpl.bos_token().size());
+        // Keep the parts in sync with the prompt (the token may span parts).
+        if (out_parts) {
+            string_parts_erase_range(*out_parts, 0, tmpl.bos_token().size());
+        }
     }
     if (inputs.add_eos && string_ends_with(result, tmpl.eos_token())) {
         result = result.substr(0, result.size() - tmpl.eos_token().size());
+        // Keep the parts in sync with the prompt (the token may span parts).
+        if (out_parts) {
+            size_t total = 0;
+            for (const auto & part : *out_parts) {
+                total += part.val.size();
+            }
+            string_parts_erase_range(*out_parts, total - tmpl.eos_token().size(), tmpl.eos_token().size());
+        }
     }
     return result;
 }
 
 std::string common_chat_template_direct_apply(
     const common_chat_template & tmpl,
-    const autoparser::generation_params & inputs) {
-    return common_chat_template_direct_apply_impl(tmpl, inputs, std::nullopt, std::nullopt, std::nullopt);
+    const autoparser::generation_params & inputs,
+    std::vector<jinja::string_part> * out_parts) {
+    return common_chat_template_direct_apply_impl(tmpl, inputs, std::nullopt, std::nullopt, std::nullopt, out_parts);
+}
+
+bool common_chat_parts_have_special_input(
+    const struct llama_vocab * vocab,
+    const std::vector<jinja::string_part> & parts) {
+    for (const auto & part : parts) {
+        if (!part.is_input || part.val.empty()) {
+            continue;
+        }
+        // Tokenize the input part in isolation with parse_special=true: if any
+        // of the resulting tokens is a control/unknown special token, the
+        // per-part parse_special handling changes the result (those tokens
+        // would be parsed as special in a whole-prompt parse_special=true pass,
+        // but are byte-fallbacked in the per-part parse_special=false pass).
+        //
+        // Note: this mirrors the tokenizer's own rule (see
+        // llama_vocab::impl::tokenizer_st_partition): with parse_special=false,
+        // special tokens with the control or unknown attribute are not parsed.
+        //
+        // The check is done per part, in isolation. A special token that spans
+        // a part boundary would require the template to emit a partial special
+        // token exactly at a user-content boundary, which well-formed chat
+        // templates do not do.
+        const auto tokens = common_tokenize(vocab, part.val, /*add_special=*/false, /*parse_special=*/true);
+        for (const auto tok : tokens) {
+            const auto attr = llama_vocab_get_attr(vocab, tok);
+            if (attr & (LLAMA_TOKEN_ATTR_CONTROL | LLAMA_TOKEN_ATTR_UNKNOWN)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+std::vector<llama_token> common_tokenize_parts(
+    const struct llama_vocab * vocab,
+    const std::vector<jinja::string_part> & parts,
+    bool add_special) {
+    if (!common_chat_parts_have_special_input(vocab, parts)) {
+        // Fast path: no is_input part contains special-token text, so the
+        // per-part parse_special distinction is moot. Tokenize the
+        // concatenated prompt in a single pass so the token ids are identical
+        // to the legacy whole-prompt tokenization (this preserves normal
+        // tokenizer merges across part boundaries).
+        std::string full;
+        size_t total = 0;
+        for (const auto & part : parts) {
+            total += part.val.size();
+        }
+        full.reserve(total);
+        for (const auto & part : parts) {
+            full += part.val;
+        }
+        return common_tokenize(vocab, full, add_special, /*parse_special=*/true);
+    }
+
+    // Protection path: tokenize each part separately so that user-provided
+    // content (is_input) is never parsed for special tokens, while template
+    // parts keep parse_special=true so legitimate special tokens like
+    // <|im_start|>, <|im_end|>, etc. are properly recognized.
+    //
+    // Merge adjacent parts with the same provenance first: the rendered
+    // parts from the jinja runtime never contain adjacent parts of the same
+    // type (it merges them), but parts appended afterwards (e.g. the
+    // continuation generation prompt) can. Merging keeps normal tokenizer
+    // merges across same-type part boundaries.
+    std::vector<jinja::string_part> merged;
+    merged.reserve(parts.size());
+    for (const auto & part : parts) {
+        if (!merged.empty() && merged.back().is_input == part.is_input) {
+            merged.back().val += part.val;
+        } else {
+            merged.push_back(part);
+        }
+    }
+
+    std::vector<llama_token> result;
+
+    bool first = true;
+    for (const auto & part : merged) {
+        if (part.val.empty()) {
+            continue;
+        }
+
+        // Only add special (BOS) on the very first non-empty part
+        const bool part_add_special = add_special && first;
+        first = false;
+
+        const auto tokens = common_tokenize(vocab, part.val, part_add_special, /*parse_special=*/!part.is_input);
+        result.insert(result.end(), tokens.begin(), tokens.end());
+    }
+
+    return result;
 }
 
 std::string common_chat_template_generation_prompt_impl(
@@ -1318,7 +1459,7 @@ static common_chat_params common_chat_templates_apply_jinja(const struct common_
         common_chat_params data;
         auto params_copy               = params;
         params_copy.reasoning_format   = COMMON_REASONING_FORMAT_NONE;
-        data.prompt                    = common_chat_template_direct_apply_impl(tmpl, params_copy);
+        data.prompt                    = common_chat_template_direct_apply_impl(tmpl, params_copy, std::nullopt, std::nullopt, std::nullopt, &data.prompt_parts);
         data.generation_prompt         = common_chat_template_generation_prompt_impl(tmpl, params);
         data.format                    = COMMON_CHAT_FORMAT_PEG_NATIVE;
         auto parser                    = build_chat_peg_parser([&data](common_chat_peg_builder &p) {

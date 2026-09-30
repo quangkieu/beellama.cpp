@@ -1,8 +1,8 @@
-# LLaMA.cpp HTTP Server
+# BeeLlama.cpp HTTP Server
 
-Fast, lightweight, pure C/C++ HTTP server based on [httplib](https://github.com/yhirose/cpp-httplib), [nlohmann::json](https://github.com/nlohmann/json) and **llama.cpp**.
+Fast, lightweight C/C++ HTTP server based on [httplib](https://github.com/yhirose/cpp-httplib), [nlohmann::json](https://github.com/nlohmann/json), and BeeLlama's upstream-compatible inference engine.
 
-Set of LLM REST APIs and a web UI to interact with llama.cpp.
+It provides LLM REST APIs and a web UI for local BeeLlama inference.
 
 **Features:**
  * LLM inference of F16 and quantized models on GPU and CPU
@@ -68,8 +68,13 @@ For the full list of features, please refer to [server's changelog](https://gith
 | `-kvo, --kv-offload, -nkvo, --no-kv-offload` | whether to enable KV cache offloading (default: enabled)<br/>(env: LLAMA_ARG_KV_OFFLOAD) |
 | `--repack, -nr, --no-repack` | whether to enable weight repacking (default: enabled)<br/>(env: LLAMA_ARG_REPACK) |
 | `--no-host` | bypass host buffer allowing extra buffers to be used<br/>(env: LLAMA_ARG_NO_HOST) |
-| `-ctk, --cache-type-k TYPE` | KV cache data type for K<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1<br/>(default: f16)<br/>(env: LLAMA_ARG_CACHE_TYPE_K) |
-| `-ctv, --cache-type-v TYPE` | KV cache data type for V<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1<br/>(default: f16)<br/>(env: LLAMA_ARG_CACHE_TYPE_V) |
+| `-ctk, --cache-type-k TYPE` | KV cache data type for K<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1, q6_0, q6_1, q3_0, q3_1, q2_0, q2_1, kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: f16)<br/>(env: LLAMA_ARG_CACHE_TYPE_K) |
+| `-ctv, --cache-type-v TYPE` | KV cache data type for V<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1, q6_0, q6_1, q3_0, q3_1, q2_0, q2_1, kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: f16)<br/>(env: LLAMA_ARG_CACHE_TYPE_V) |
+| `--kvarn-window-chunk N` | CUDA KVarN prefill materialization window for the target context<br/>smaller values reduce transient VRAM but add partial-softmax merges<br/>(default: GGML_KVARN_WINDOW_CHUNK or 65536)<br/>(env: LLAMA_ARG_KVARN_WINDOW_CHUNK) |
+| `--kv-tail-tokens SPEC` | exact KV-cache tail: 0, auto, N, positional list, or named group list<br/>KVarN always retains an intrinsic 128-token exact suffix<br/>(default: 0)<br/>(env: LLAMA_ARG_KV_TAIL_TOKENS) |
+| `--kv-tail-type TYPE` | exact KV-cache tail type: f16 or bf16<br/>(default: bf16 for standard caches, f16 for KVarN)<br/>(env: LLAMA_ARG_KV_TAIL_TYPE) |
+| `--cache-type-k-swa TYPE` | SWA-layer KVarN cache type override for K<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-k)<br/>(env: LLAMA_ARG_CACHE_TYPE_K_SWA) |
+| `--cache-type-v-swa TYPE` | SWA-layer KVarN cache type override for V<br/>allowed values: kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>(default: same as --cache-type-v)<br/>(env: LLAMA_ARG_CACHE_TYPE_V_SWA) |
 | `-dt, --defrag-thold N` | KV cache defragmentation threshold (DEPRECATED)<br/>(env: LLAMA_ARG_DEFRAG_THOLD) |
 | `--rpc SERVERS` | comma-separated list of RPC servers (host:port)<br/>(env: LLAMA_ARG_RPC) |
 | `-lm, --load-mode MODE` | model loading mode (default: auto)<br/>- auto: mmap, unless a device does not support it<br/>- none: no special loading mode<br/>- mmap: memory-map model (if mmap disabled, slower load but may reduce pageouts if not using mlock)<br/>- mlock: force system to keep model in RAM rather than swapping or compressing<br/>- mmap+mlock: mmap + force system to keep model in RAM rather than swapping or compressing<br/>- dio: use DirectIO if available<br/><br/>(env: LLAMA_ARG_LOAD_MODE) |
@@ -111,8 +116,8 @@ For the full list of features, please refer to [server's changelog](https://gith
 | `-lv, --verbosity, --log-verbosity N` | Set the verbosity threshold. Messages with a higher verbosity will be ignored. Values:<br/> - 0: generic output<br/> - 1: error<br/> - 2: warning<br/> - 3: info<br/> - 4: trace (more info)<br/> - 5: debug<br/>(default: 3)<br/><br/>(env: LLAMA_ARG_LOG_VERBOSITY) |
 | `--log-prefix, --no-log-prefix` | Enable prefix in log messages<br/>(env: LLAMA_ARG_LOG_PREFIX) |
 | `--log-timestamps, --no-log-timestamps` | Enable timestamps in log messages<br/>(env: LLAMA_ARG_LOG_TIMESTAMPS) |
-| `--spec-draft-type-k, -ctkd, --cache-type-k-draft TYPE` | KV cache data type for K for the draft model<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1<br/>(default: f16)<br/>(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K) |
-| `--spec-draft-type-v, -ctvd, --cache-type-v-draft TYPE` | KV cache data type for V for the draft model<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1<br/>(default: f16)<br/>(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V) |
+| `--spec-draft-type-k, -ctkd, --cache-type-k-draft TYPE` | KV cache data type for K for the draft model<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1, q6_0, q6_1, q3_0, q3_1, q2_0, q2_1, kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>KVarN values require one model-backed speculative mode with an owned draft KV cache<br/>(default: f16)<br/>(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_K) |
+| `--spec-draft-type-v, -ctvd, --cache-type-v-draft TYPE` | KV cache data type for V for the draft model<br/>allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1, q6_0, q6_1, q3_0, q3_1, q2_0, q2_1, kvarn2, kvarn3, kvarn4, kvarn5, kvarn6, kvarn8<br/>KVarN values require one model-backed speculative mode with an owned draft KV cache<br/>(default: f16)<br/>(env: LLAMA_ARG_SPEC_DRAFT_CACHE_TYPE_V) |
 
 
 ### Sampling params
@@ -234,6 +239,13 @@ For the full list of features, please refer to [server's changelog](https://gith
 | `--reasoning-effort LEVEL` | reasoning effort level given to the chat template: 'default' to keep the template default,<br/>or a level such as 'minimal', 'low', 'medium', 'high', 'xhigh' or 'max' (default: default)<br/>(env: LLAMA_ARG_REASONING_EFFORT) |
 | `--reasoning-budget N` | token budget for thinking: -1 for unrestricted, 0 for immediate end, N>0 for token budget (default: -1)<br/>(env: LLAMA_ARG_THINK_BUDGET) |
 | `--reasoning-budget-message MESSAGE` | message injected before the end-of-thinking tag when reasoning budget is exhausted (default: none)<br/>(env: LLAMA_ARG_THINK_BUDGET_MESSAGE) |
+| `--reasoning-loop-guard MODE` | reasoning loop guard mode: off, force-close, or stop (default: force-close)<br/>(env: LLAMA_ARG_REASONING_LOOP_GUARD) |
+| `--reasoning-loop-min-tokens N` | minimum hidden reasoning tokens before loop checks (default: 512)<br/>(env: LLAMA_ARG_REASONING_LOOP_MIN_TOKENS) |
+| `--reasoning-loop-window N` | token tail window for reasoning loop checks (default: 1024)<br/>(env: LLAMA_ARG_REASONING_LOOP_WINDOW) |
+| `--reasoning-loop-max-period N` | maximum periodic loop length to check (default: 128)<br/>(env: LLAMA_ARG_REASONING_LOOP_MAX_PERIOD) |
+| `--reasoning-loop-min-coverage N` | minimum repeated token coverage before loop trigger (default: 256)<br/>(env: LLAMA_ARG_REASONING_LOOP_MIN_COVERAGE) |
+| `--reasoning-loop-check-interval N` | accepted-token interval between loop checks (default: 64)<br/>(env: LLAMA_ARG_REASONING_LOOP_CHECK_INTERVAL) |
+| `--reasoning-loop-interventions N` | maximum force-close interventions before stop (default: 2)<br/>(env: LLAMA_ARG_REASONING_LOOP_INTERVENTIONS) |
 | `--reasoning-preserve, --no-reasoning-preserve` | preserve reasoning trace in the full history, not just the last assistant message (default: enabled)<br/>compatible with certain templates having 'supports_preserve_reasoning' capability<br/>example: https://docs.z.ai/guides/capabilities/thinking-mode#preserved-thinking<br/>(env: LLAMA_ARG_REASONING_PRESERVE) |
 | `--chat-template JINJA_TEMPLATE` | set custom jinja chat template (default: template taken from model's metadata)<br/>if suffix/prefix are specified, template will be disabled<br/>only commonly used templates are accepted (unless --jinja is set before this flag):<br/>list of built-in templates:<br/>bailing, bailing-think, bailing2, chatglm3, chatglm4, chatml, command-r, deepseek, deepseek-ocr, deepseek2, deepseek3, exaone-moe, exaone3, exaone4, falcon3, gemma, gigachat, glmedge, gpt-oss, granite, granite-4.0, granite-4.1, grok-2, hunyuan-dense, hunyuan-moe, hunyuan-vl, kimi-k2, llama2, llama2-sys, llama2-sys-bos, llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1, mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch, openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss, smolvlm, solar-open, vicuna, vicuna-orca, yandex, zephyr<br/>(env: LLAMA_ARG_CHAT_TEMPLATE) |
 | `--chat-template-file JINJA_TEMPLATE_FILE` | set custom jinja chat template file (default: template taken from model's metadata)<br/>if suffix/prefix are specified, template will be disabled<br/>only commonly used templates are accepted (unless --jinja is set before this flag):<br/>list of built-in templates:<br/>bailing, bailing-think, bailing2, chatglm3, chatglm4, chatml, command-r, deepseek, deepseek-ocr, deepseek2, deepseek3, exaone-moe, exaone3, exaone4, falcon3, gemma, gigachat, glmedge, gpt-oss, granite, granite-4.0, granite-4.1, grok-2, hunyuan-dense, hunyuan-moe, hunyuan-vl, kimi-k2, llama2, llama2-sys, llama2-sys-bos, llama2-sys-strip, llama3, llama4, megrez, minicpm, mistral-v1, mistral-v3, mistral-v3-tekken, mistral-v7, mistral-v7-tekken, monarch, openchat, orion, pangu-embedded, phi3, phi4, rwkv-world, seed_oss, smolvlm, solar-open, vicuna, vicuna-orca, yandex, zephyr<br/>(env: LLAMA_ARG_CHAT_TEMPLATE_FILE) |
@@ -244,6 +256,7 @@ For the full list of features, please refer to [server's changelog](https://gith
 | `--sleep-idle-seconds SECONDS` | number of seconds of idleness after which the server will sleep (default: -1; -1 = disabled) |
 | `--log-prompts-dir PATH` | Log prompts to directory (auto-created if not present; only used for debugging, default: disabled) |
 | `--spec-draft-hf, -hfd, -hfrd, --hf-repo-draft <user>/<model>[:quant]` | Same as --hf-repo, but for the draft model (default: unused)<br/>(env: LLAMA_ARG_SPEC_DRAFT_HF_REPO) |
+| `--spec-draft-ubatch-size, -ubd N` | physical maximum batch size for the draft context (default: 128)<br/>(env: LLAMA_ARG_SPEC_DRAFT_UBATCH_SIZE) |
 | `--spec-draft-threads, -td, --threads-draft N` | number of threads to use during generation (default: same as --threads) |
 | `--spec-draft-threads-batch, -tbd, --threads-batch-draft N` | number of threads to use during batch and prompt processing (default: same as --threads-draft) |
 | `--spec-draft-cpu-mask, -Cd, --cpu-mask-draft M` | Draft model CPU affinity mask. Complements cpu-range-draft (default: same as --cpu-mask) |
@@ -255,6 +268,15 @@ For the full list of features, please refer to [server's changelog](https://gith
 | `--spec-draft-cpu-strict-batch, --cpu-strict-batch-draft <0\|1>` | Use strict CPU placement for draft model (default: --cpu-strict-draft) |
 | `--spec-draft-prio-batch, --prio-batch-draft N` | set draft process/thread priority : 0-normal, 1-medium, 2-high, 3-realtime (default: 0) |
 | `--spec-draft-poll-batch, --poll-batch-draft <0\|1>` | Use polling to wait for draft model work (default: --poll-draft) |
+| `--spec-dm-controller MODE` | adaptive DFlash draft-max controller: off or profit (default: profit)<br/>(env: LLAMA_ARG_SPEC_DM_CONTROLLER) |
+| `--spec-dm-profit-min F` | minimum profit margin over the no-spec baseline before disabling dwell clears (default: 0.0500)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_MIN) |
+| `--spec-dm-profit-raise-margin F` | relative profit margin required to raise adaptive draft depth (default: 0.0500)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_RAISE_MARGIN) |
+| `--spec-dm-profit-lower-margin F` | relative profit margin required to lower adaptive draft depth (default: 0.0500)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_LOWER_MARGIN) |
+| `--spec-dm-profit-ewma-alpha F` | EWMA alpha for adaptive draft-max profit statistics (default: 0.1500)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_EWMA_ALPHA) |
+| `--spec-dm-profit-min-samples N` | minimum samples before adaptive draft-max profit stats are ready (default: 3)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_MIN_SAMPLES) |
+| `--spec-dm-profit-warmup N` | measured samples for each initial positive-depth profit probe (default: 0, 0 = min samples)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_WARMUP) |
+| `--spec-dm-profit-baseline-interval N` | active profit-controller cycles between no-spec baseline probes (default: 1024, 0 = disabled)<br/>(env: LLAMA_ARG_SPEC_DM_PROFIT_BASELINE_INTERVAL) |
+| `--spec-draft-kvarn-window-chunk N` | CUDA KVarN prefill materialization window for an owned draft context<br/>smaller values reduce transient VRAM but add partial-softmax merges<br/>(default: 2048)<br/>(env: LLAMA_ARG_SPEC_DRAFT_KVARN_WINDOW_CHUNK) |
 | `--spec-draft-override-tensor, -otd, --override-tensor-draft <tensor name pattern>=<buffer type>,...` | override tensor buffer type for draft model |
 | `--spec-draft-cpu-moe, -cmoed, --cpu-moe-draft` | keep all Mixture of Experts (MoE) weights in the CPU for the draft model<br/>(env: LLAMA_ARG_SPEC_DRAFT_CPU_MOE) |
 | `--spec-draft-n-cpu-moe, --spec-draft-ncmoe, -ncmoed, --n-cpu-moe-draft N` | keep the Mixture of Experts (MoE) weights of the first N layers in the CPU for the draft model<br/>(env: LLAMA_ARG_SPEC_DRAFT_N_CPU_MOE) |
@@ -303,17 +325,10 @@ For the full list of features, please refer to [server's changelog](https://gith
 
 Note: If both command line argument and environment variable are both set for the same param, the argument will take precedence over env var.
 
-For string options like `--load-mode`, the environment variable is handled as shown in this example:
-- `LLAMA_ARG_LOAD_MODE=auto` sets the loading mode to auto (default)
-- `LLAMA_ARG_LOAD_MODE=none` disables special loading
-- `LLAMA_ARG_LOAD_MODE=mmap` enables memory-mapping
-- `LLAMA_ARG_LOAD_MODE=mlock` locks the model in RAM
-- `LLAMA_ARG_LOAD_MODE=mmap+mlock` enables memory-mapping and locks in RAM
-- `LLAMA_ARG_LOAD_MODE=dio` uses DirectIO if available
-
-For boolean options like `--kv-offload`:
-- `LLAMA_ARG_KV_OFFLOAD=true` means enabled, other accepted values are: `1`, `on`, `enabled`
-- `LLAMA_ARG_KV_OFFLOAD=false` means disabled, other accepted values are: `0`, `off`, `disabled`
+For boolean options like `--mmap` or `--kv-offload`, the environment variable is handled as shown in this example:
+- `LLAMA_ARG_MMAP=true` means enabled, other accepted values are: `1`, `on`, `enabled`
+- `LLAMA_ARG_MMAP=false` means disabled, other accepted values are: `0`, `off`, `disabled`
+- If `LLAMA_ARG_NO_MMAP` is present (no matter the value), it means disabling mmap
 
 Example usage of docker compose with environment variables:
 
@@ -344,63 +359,11 @@ It is currently available in the following endpoints:
 
 For more details, please refer to [multimodal documentation](../../docs/multimodal.md)
 
-### Server tools support
+### Built-in tools support
 
-The server includes a set of server tools that enable the LLM to access the local file system directly from the Web UI.
+The server includes a set of built-in tools that enable the LLM to access the local file system directly from the Web UI.
 
 To use this feature, start the server with `--tools all`. You can also enable only specific tools by passing a comma-separated list: `--tools name1,name2,...`. Run `--help` for the full list of available tool names.
-
-### MCP servers
-
-Besides the built-in tools, the server can expose tools coming from MCP servers, added in [#26062](https://github.com/ggml-org/llama.cpp/pull/26062). Only the stdio transport is supported: such a server is a child process reading JSON-RPC messages on its stdin and writing replies on its stdout, so nothing has to be started or maintained outside `llama-server`.
-
-Servers are declared in a Cursor-compatible JSON file:
-
-```json
-{
-  "mcpServers": {
-    "example": { "command": "/path/to/server", "args": [] }
-  }
-}
-```
-
-```sh
-llama-server -m model.gguf --mcp-servers-config mcp.json
-```
-
-The same JSON can be passed inline with `--mcp-servers-json`. Each entry under `mcpServers` accepts:
-
-| Key | Explanation |
-| --- | ----------- |
-| `command` | executable to spawn, required, entries without it are skipped |
-| `args` | array of arguments |
-| `env` | object merged over the parent environment |
-| `cwd` | working directory of the child process |
-| `timeout_ms` | per-tool-call timeout (default: 30000) |
-
-Every server is spawned once at startup to list its tools, then stopped, and respawned on demand when one of its tools is called. Tools are exposed as `<server>_<tool>` alongside the built-in ones: they show up in the Web UI and in `GET /tools`, and the model calls them like any other tool. A name colliding with an already registered tool is skipped. This is independent of `--tools`, MCP servers can be the only tools available.
-
-The child process runs with the same privileges as the server, so only declare commands you trust. As with `--tools`, `--cors-origins` then defaults to `localhost`.
-
-Note: `--ui-mcp-proxy` is unrelated, it only lets the Web UI reach remote MCP servers from the browser.
-
-Any server written against the [MCP specification](https://modelcontextprotocol.io) works as is, whether it uses an official SDK or not: the transport is one JSON-RPC message per line on stdio, so a script wrapping an existing program is a valid server too.
-
-### CORS
-
-By default the server reflects any `Origin` header back with credentials allowed. This matches the old, always-on `*` behavior and is fine as long as the server only exposes stateless, read-only endpoints.
-
-Enabling `--tools` or `--agent` exposes file read/write over the API, so in that case `--cors-origins` defaults to `localhost` instead: only pages served from localhost can reach the server. Pass `--cors-origins` explicitly to override either default.
-
-Recommended `--cors-origins` setting, depending on where the server runs:
-
-| Deployment | Recommendation |
-| ---------- | --------------- |
-| Public | set an API key, put the server behind a reverse proxy, `--cors-origins` optional |
-| Local network | set `--cors-origins` to your frontend's origin |
-| Same machine | `--cors-origins localhost` (default once `--agent` is set) |
-
-Related flags: `--cors-origins`, `--cors-methods`, `--cors-headers`, `--cors-credentials` / `--no-cors-credentials`. Background and rationale: [#25655](https://github.com/ggml-org/llama.cpp/pull/25655).
 
 ## Build
 
@@ -1140,6 +1103,13 @@ In *router mode* the query param `?model={model_id}` has to be set. This endpoin
 | `llamacpp:n_tokens_max` | Counter | High watermark of the context size observed. |
 | `llamacpp:n_decode_total` | Counter | Total Number of llama_decode() calls. |
 | `llamacpp:n_busy_slots_per_decode` | Gauge | Average number of busy slots per llama_decode() call. |
+| `llamacpp:prompt_cache_accounted_bytes` | Gauge | Serialized prompt-cache payload bytes, deduplicating shared checkpoint buffers; excludes container capacity and allocator overhead. |
+| `llamacpp:prompt_cache_admission_attempts_total` | Counter | Prompt-cache RAM admission attempts. |
+| `llamacpp:prompt_cache_admission_successes_total` | Counter | Prompt-cache RAM admissions committed. |
+| `llamacpp:prompt_cache_admission_failures_total` | Counter | Prompt-cache RAM admissions rejected or failed. |
+| `llamacpp:prompt_cache_restore_attempts_total` | Counter | Prompt-cache RAM restore attempts. |
+| `llamacpp:prompt_cache_restore_successes_total` | Counter | Prompt-cache RAM restores committed. |
+| `llamacpp:prompt_cache_restore_failures_total` | Counter | Prompt-cache RAM restores rejected during preparation. |
 | `llamacpp:spec_decode_num_draft_tokens_total` | Counter | Total draft tokens generated (0 when spec-decode is off). |
 | `llamacpp:spec_decode_num_accepted_tokens_total` | Counter | Total draft tokens accepted by the target model (0 when spec-decode is off). |
 | `llamacpp:spec_decode_num_drafts_total` | Counter | Total speculative decoding verification steps (0 when spec-decode is off). |
@@ -1317,7 +1287,7 @@ The `response_format` parameter supports both plain JSON output (e.g. `{"type": 
 
 `chat_template_kwargs`: Allows sending additional parameters to the json templating system. For example: `{"enable_thinking": false}`
 
-`reasoning_effort`: If `none`, reasoning/thinking is disabled. Otherwise, the value is made available to the jinja template.
+`reasoning_effort`: If set to `none`, reasoning will be disabled for this request. Other values (e.g., `low`, `max`) have no effect on reasoning.
 
 `reasoning_format`: The reasoning format to be parsed. If set to `none`, it will output the raw generated text.
 
@@ -1404,6 +1374,15 @@ The response contains a `timings` object, for example:
   // ...
   "timings": {
     "cache_n": 236, // number of prompt tokens reused from cache
+    "cache_slot_ms": 0.124, // pre-launch slot selection and RAM-cache work
+    "cache_ram_save_ms": 0.0,
+    "cache_ram_load_ms": 0.0,
+    "cache_ram_restore_prepare_ms": 0.0,
+    "cache_ram_restore_commit_ms": 0.0,
+    "cache_ram_update_ms": 0.0,
+    "cache_checkpoint_restore_ms": 0.0, // live durable-checkpoint restore work
+    "cache_checkpoint_prepare_ms": 0.0,
+    "cache_checkpoint_commit_ms": 0.0,
     "prompt_n": 1, // number of prompt tokens being processed
     "prompt_ms": 30.958,
     "prompt_per_token_ms": 30.958,
@@ -1416,7 +1395,7 @@ The response contains a `timings` object, for example:
 }
 ```
 
-This provides information on the performance of the server. It also allows calculating the current context usage.
+This provides information on the performance of the server. `cache_slot_ms` accounts for work before prompt processing starts. The RAM fields split admission (`save`), restore preparation, restore commit, and cache maintenance (`update`); `cache_ram_load_ms` covers the complete lookup and restore operation. `cache_checkpoint_restore_ms` is included in `prompt_ms`, with its preparation and commit phases reported separately. The timings also allow calculating current context usage.
 
 The total number of tokens in context is equal to `prompt_n + cache_n + predicted_n`
 
@@ -1665,9 +1644,9 @@ curl http://localhost:8080/v1/messages/count_tokens \
 {"input_tokens": 10}
 ```
 
-## Server tools
+## Server built-in tools
 
-The server exposes a REST API under `/tools` that allows the Web UI to call server tools. This endpoint is intended to be used internally by the Web UI and subject to change or to be removed in the future.
+The server exposes a REST API under `/tools` that allows the Web UI to call built-in tools. This endpoint is intended to be used internally by the Web UI and subject to change or to be removed in the future.
 
 **Please do NOT use this endpoint in a downstream application**
 
@@ -1732,7 +1711,7 @@ You may also specify default arguments that will be passed to every model instan
 llama-server -ctx 8192 -n 1024 -np 2
 ```
 
-Note: model instances inherit both command line arguments and environment variables from the router server.
+Note: model instances inherit non-sensitive command-line arguments and environment variables from the router server. `--hf-token` is removed from child argv and passed only as `HF_TOKEN`; it is not included in model-list responses or serialized presets.
 
 Alternatively, you can also add GGUF based preset (see next section)
 
@@ -1793,7 +1772,6 @@ The precedence rule for preset options is as follows:
 We also offer additional options that are exclusive to presets (these aren't treated as command-line arguments):
 - `load-on-startup` (boolean): Controls whether the model loads automatically when the server starts. Only applies at startup: if the model list is reloaded later (for example after editing the preset file), a newly added model is listed but not loaded
 - `stop-timeout` (int, seconds): After requested unload, wait for this many seconds before forcing termination (default: 10)
-- `dedup-cache-models` (boolean): When the preset uses `hf-repo` pointing to a model that is already downloaded, hide the corresponding cached model entry from `GET /models` (the preset entry remains visible). Set it in the `[*]` section to apply to all presets.
 
 ### Routing requests
 
@@ -1829,10 +1807,8 @@ Listing all models in cache. The model metadata will also include a field to ind
 {
   "data": [{
     "id": "ggml-org/gemma-3-4b-it-GGUF:Q4_K_M",
-    "path": "/Users/REDACTED/Library/Caches/llama.cpp/ggml-org_gemma-3-4b-it-GGUF_gemma-3-4b-it-Q4_K_M.gguf",
     "status": {
-      "value": "loaded",
-      "args": ["llama-server", "-ctx", "4096"]
+      "value": "loaded"
     },
     "architecture": {
       "input_modalities": [
@@ -1848,11 +1824,19 @@ Listing all models in cache. The model metadata will also include a field to ind
 }
 ```
 
-Note:
-1. Adding `?reload=1` to the query params will refresh the list of models. The behavior is as follow:
-    - If a model is running but updated or removed from the source, it will be unloaded
-    - If a model is not running, it will be added or updated according to the source
-2. When the model is loaded, the info from `/v1/models` is forwarded to router's `/v1/models`. This includes metadata about the model and the runtime instance.
+`GET /models` is read-only. Query parameters cannot refresh, load, unload, or
+autoload models. Matching upstream, each entry's `status` exposes the child
+argv (`status.args`) and, for preset-backed models, the resolved INI preset
+(`status.preset`); sensitive options such as `--hf-token` and `--api-key` are
+stripped from both. Note that `status.args`/`status.preset` may contain local
+filesystem paths for preset models defined with custom paths. When a model is
+loaded, non-conflicting public metadata from the child `/v1/models` response
+may be included.
+
+To rescan model sources, use `POST /models/reload`. This may unload a running
+model whose source was updated or removed and add or update unloaded models.
+The route goes through normal API-key authentication; configure `--api-key` for
+a protected router and send `Authorization: Bearer TOKEN` (or `X-Api-Key`).
 
 The `status` object can be:
 
@@ -1987,7 +1971,7 @@ Example events:
 }
 // note for "loading" status:
 // - subsequent events will follow the same order of "stages" list
-// - mmap may report incorrect progress on some platforms; if you need exact progress, use --load-mode none
+// - mmap is may report incorrect progress on some platforms; if you need exact progress, use --no-mmap
 
 {
   "model": "...",
@@ -2105,7 +2089,6 @@ Note that the following endpoints are exempt from being considered as incoming t
 - `GET /health`
 - `GET /props`
 - `GET /models`
-- `GET /metrics`
 
 ## More examples
 
