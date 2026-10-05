@@ -4338,31 +4338,29 @@ private:
 
         if (ret != 0) {
             if (n_batch == 1 && ret == 1) {
-                GGML_ASSERT(batch_view.n_tokens == 1);
+                GGML_ASSERT(batch.view.size() == 1);
                 const std::string err = "Unable to allocate KV cache for this request.";
-                for (int32_t j = 0; j < batch_view.n_seq_id[0]; ++j) {
-                    const llama_seq_id owner = batch_view.seq_id[0][j];
-                    for (auto & slot : slots) {
-                        if (!slot.is_processing() || slot.id != owner) {
-                            continue;
-                        }
-                        SLT_ERR(slot, "%s off = %d, n_batch = %d, ret = %d\n",
-                                err.c_str(), off, n_batch, ret);
-                        send_error(slot, err, ERROR_TYPE_SERVER);
-                        const bool target_cleared = llama_memory_seq_rm(
-                                llama_get_memory(slot.ctx_tgt), slot.id, -1, -1);
-                        const bool draft_cleared = !slot.draft_owns_state || llama_memory_seq_rm(
-                                llama_get_memory(slot.ctx_dft), slot.id, -1, -1);
-                        if (target_cleared && draft_cleared) {
-                            slot.prompt_reset_after_memory_clear();
-                        } else {
-                            SLT_ERR(slot,
-                                    "failed to clear owner after KV allocation refusal (target = %s, draft = %s)\n",
-                                    target_cleared ? "cleared" : "refused",
-                                    draft_cleared ? "cleared" : "refused");
-                        }
-                        slot.release();
+                const llama_seq_id owner = batch.view.tokens[off].seq_id;
+                for (auto & slot : slots) {
+                    if (!slot.is_processing() || slot.id != owner) {
+                        continue;
                     }
+                    SLT_ERR(slot, "%s off = %d, n_batch = %d, ret = %d\n",
+                            err.c_str(), off, n_batch, ret);
+                    send_error(slot, err, ERROR_TYPE_SERVER);
+                    const bool target_cleared = llama_memory_seq_rm(
+                            llama_get_memory(slot.ctx_tgt), slot.id, -1, -1);
+                    const bool draft_cleared = !slot.draft_owns_state || llama_memory_seq_rm(
+                            llama_get_memory(slot.ctx_dft), slot.id, -1, -1);
+                    if (target_cleared && draft_cleared) {
+                        slot.prompt_reset_after_memory_clear();
+                    } else {
+                        SLT_ERR(slot,
+                                "failed to clear owner after KV allocation refusal (target = %s, draft = %s)\n",
+                                target_cleared ? "cleared" : "refused",
+                                draft_cleared ? "cleared" : "refused");
+                    }
+                    slot.release();
                 }
                 return true;
             }

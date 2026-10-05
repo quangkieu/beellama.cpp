@@ -1573,7 +1573,7 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
         // the final prompt hidden state needed by the first draft.
         for (llama_seq_id seq_id = 0; seq_id < (llama_seq_id) n_seq; ++seq_id) {
             const int32_t first = i_batch_beg[seq_id];
-            if (first >= 0 && batch_in.pos[first] == 0) {
+            if (first >= 0 && batch_in.tokens[first].pos[0] == 0) {
                 reset_seq_state(seq_id);
             }
         }
@@ -2706,12 +2706,17 @@ common_params common_base_params_to_speculative(const common_params & params) {
         result.n_gpu_layers          = params_spec.n_gpu_layers;
         result.tensor_buft_overrides = params_spec.tensor_buft_overrides;
 
-        // a draft pinned to a single device doesn't need the meta wrapper an inherited -sm tensor would give it
-        // (the device list is null-terminated, so a single device means size 2)
-        const size_t n_devs = std::count_if(params_spec.devices.begin(), params_spec.devices.end(),
-                [](ggml_backend_dev_t d) { return d != nullptr; });
-        if (n_devs == 1) {
-            result.split_mode = LLAMA_SPLIT_MODE_LAYER;
+        // A tensor split is a topology property of the model being loaded, not
+        // a global property that can be inherited from the target.  In
+        // particular, a single explicitly selected draft device cannot form a
+        // tensor-split meta device.  Keep upstream's split behavior for true
+        // multi-device drafts, but collapse the degenerate topology before
+        // model fitting and buffer placement see it.
+        const size_t n_draft_devices = std::count_if(
+            result.devices.begin(), result.devices.end(), [](ggml_backend_dev_t dev) { return dev != nullptr; });
+        if (!result.devices.empty() && n_draft_devices <= 1) {
+            result.split_mode = LLAMA_SPLIT_MODE_NONE;
+            std::fill(std::begin(result.tensor_split), std::end(result.tensor_split), 0.0f);
         }
 
         if (params_spec.cpuparams.n_threads > 0) {

@@ -8,10 +8,11 @@
 #include "fattn.cuh"
 
 #if !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
+// one list per group of ncols1 queries: a column is selected if any query of the group can see it
 __launch_bounds__(256, 1)
 static __global__ void flash_attn_mask_to_sparse_indices(
-        const half * mask_ptr, int32_t * indices_ptr, const int ne30, const int n_kv_max,
-        const int64_t s31, const int64_t s33) {
+        const half * mask_ptr, int32_t * indices_ptr, int32_t * counts_ptr, const int ne30, const int n_queries,
+        const int ncols1, const int n_kv_max, const int64_t s31, const int64_t s33) {
     ggml_cuda_pdl_sync();
 
     constexpr int values_per_lane = 8;
@@ -19,10 +20,12 @@ static __global__ void flash_attn_mask_to_sparse_indices(
     const int warp     = tid / WARP_SIZE;
     const int lane     = tid % WARP_SIZE;
     const int sequence = blockIdx.y;
-    const int query    = blockIdx.x;
+    const int group    = blockIdx.x;
 
-    const half * mask = mask_ptr + sequence*s33 + query*s31;
-    int32_t * indices = indices_ptr + (int64_t(sequence)*gridDim.x + query)*n_kv_max;
+    const int q0 = group*ncols1;
+    const int q1 = min(q0 + ncols1, n_queries);
+    const half * mask = mask_ptr + sequence*s33 + q0*s31;
+    int32_t * indices = indices_ptr + (int64_t(sequence)*gridDim.x + group)*n_kv_max;
 
     __shared__ int warp_offsets[256/WARP_SIZE];
     __shared__ int row_count;
@@ -39,7 +42,10 @@ static __global__ void flash_attn_mask_to_sparse_indices(
 #pragma unroll
         for (int item = 0; item < values_per_lane; ++item) {
             const int i = i0 + (warp*values_per_lane + item)*WARP_SIZE + lane;
-            const bool selected = i < ne30 && isfinite(__half2float(mask[i]));
+            bool selected = false;
+            for (int q = 0; q < q1 - q0 && !selected; ++q) {
+                selected = i < ne30 && isfinite(__half2float(mask[q*s31 + i]));
+            }
             selected_warp[item] = __ballot_sync(0xFFFFFFFF, selected);
             warp_count += __popc(selected_warp[item]);
         }
@@ -80,9 +86,12 @@ static __global__ void flash_attn_mask_to_sparse_indices(
         __syncthreads();
     }
 
-    const int count = row_count;
+    const int count = min(row_count, n_kv_max);
     for (int i = count + tid; i < n_kv_max; i += blockDim.x) {
         indices[i] = -1;
+    }
+    if (tid == 0) {
+        counts_ptr[int64_t(sequence)*gridDim.x + group] = count;
     }
     __syncthreads();
 
@@ -92,18 +101,18 @@ static __global__ void flash_attn_mask_to_sparse_indices(
 #endif // !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
 
 void ggml_cuda_flash_attn_ext_compact_mask(
-        const ggml_tensor * mask, int32_t * indices, int32_t n_kv_max, cudaStream_t stream) {
+        const ggml_tensor * mask, int32_t * indices, int32_t * counts, int32_t n_queries, int32_t ncols1, int32_t n_kv_max, cudaStream_t stream) {
 #if defined(GGML_USE_HIP) || defined(GGML_USE_MUSA)
-    GGML_UNUSED_VARS(mask, indices, n_kv_max, stream);
+    GGML_UNUSED_VARS(mask, indices, counts, n_queries, ncols1, n_kv_max, stream);
     GGML_ABORT("sparse flash attention is only supported on NVIDIA CUDA");
 #else
     const int64_t s31 = mask->nb[1] / sizeof(half);
     const int64_t s33 = mask->nb[3] / sizeof(half);
-    const dim3 blocks_num(mask->ne[1], mask->ne[3], 1);
+    const dim3 blocks_num((n_queries + ncols1 - 1)/ncols1, mask->ne[3], 1);
     const dim3 block_dim(256, 1, 1);
     const ggml_cuda_kernel_launch_params launch_params(blocks_num, block_dim, 0, stream);
     ggml_cuda_kernel_launch(flash_attn_mask_to_sparse_indices, launch_params,
-        (const half *) mask->data, indices, int(mask->ne[0]), n_kv_max, s31, s33);
+        (const half *) mask->data, indices, counts, int(mask->ne[0]), n_queries, ncols1, n_kv_max, s31, s33);
     CUDA_CHECK(cudaGetLastError());
 #endif // !defined(GGML_USE_HIP) && !defined(GGML_USE_MUSA)
 }
@@ -376,15 +385,44 @@ static void ggml_cuda_flash_attn_ext_mma_f16(ggml_backend_cuda_context & ctx, gg
     }
 }
 
-#define FATTN_VEC_CASE(D, type_K, type_V)                                                                        \
-    {                                                                                                            \
+template <ggml_type type_K, ggml_type type_V>
+struct ggml_cuda_fa_is_compiled {
+    static constexpr bool value = false;
+};
+
+#define FA_COMPILED_PAIR(k, v) \
+    template <> struct ggml_cuda_fa_is_compiled<GGML_TYPE_##k, GGML_TYPE_##v> { \
+        static constexpr bool value = (GGML_CUDA_FA_##k##_##v != 0); \
+    };
+
+#define FA_COMPILED_ROW(k) \
+    FA_COMPILED_PAIR(k, Q2_0S) FA_COMPILED_PAIR(k, Q2_1) \
+    FA_COMPILED_PAIR(k, Q3_0)  FA_COMPILED_PAIR(k, Q3_1) \
+    FA_COMPILED_PAIR(k, Q4_0)  FA_COMPILED_PAIR(k, Q4_1) \
+    FA_COMPILED_PAIR(k, Q5_0)  FA_COMPILED_PAIR(k, Q5_1) \
+    FA_COMPILED_PAIR(k, Q6_0)  FA_COMPILED_PAIR(k, Q6_1) \
+    FA_COMPILED_PAIR(k, Q8_0)  FA_COMPILED_PAIR(k, BF16) \
+    FA_COMPILED_PAIR(k, F16)
+
+FA_COMPILED_ROW(Q2_0S) FA_COMPILED_ROW(Q2_1)
+FA_COMPILED_ROW(Q3_0)  FA_COMPILED_ROW(Q3_1)
+FA_COMPILED_ROW(Q4_0)  FA_COMPILED_ROW(Q4_1)
+FA_COMPILED_ROW(Q5_0)  FA_COMPILED_ROW(Q5_1)
+FA_COMPILED_ROW(Q6_0)  FA_COMPILED_ROW(Q6_1)
+FA_COMPILED_ROW(Q8_0)  FA_COMPILED_ROW(BF16)
+FA_COMPILED_ROW(F16)
+#undef FA_COMPILED_ROW
+#undef FA_COMPILED_PAIR
+
+#define FATTN_VEC_CASE(D, type_K, type_V) \
+    if constexpr (ggml_cuda_fa_is_compiled<type_K, type_V>::value) { \
         const bool type_K_okay = K->type == (type_K) || (K->type == GGML_TYPE_F32 && (type_K) == GGML_TYPE_F16); \
         const bool type_V_okay = V->type == (type_V) || (V->type == GGML_TYPE_F32 && (type_V) == GGML_TYPE_F16); \
-        if (Q->ne[0] == (D) && type_K_okay && type_V_okay) {                                                     \
-            ggml_cuda_flash_attn_ext_vec_case<D, type_K, type_V>(ctx, dst);                                      \
-            return;                                                                                              \
-        }                                                                                                        \
-    }                                                                                                            \
+        if (Q->ne[0] == (D) && type_K_okay && type_V_okay) { \
+            ggml_cuda_flash_attn_ext_vec_case<D, type_K, type_V>(ctx, dst); \
+            return; \
+        } \
+    }
 
 #define FATTN_VEC_CASES_ALL_D(type_K, type_V) \
     FATTN_VEC_CASE( 64, type_K, type_V)       \
@@ -471,21 +509,24 @@ static bool ggml_cuda_fattn_default_quant_pair(ggml_type type_K, ggml_type type_
 static bool ggml_cuda_fattn_pair_compiled(ggml_type type_K, ggml_type type_V) {
     type_K = ggml_cuda_fattn_canonical_kv_type(type_K);
     type_V = ggml_cuda_fattn_canonical_kv_type(type_V);
-
     if (!ggml_cuda_fattn_kv_type_supported(type_K) || !ggml_cuda_fattn_kv_type_supported(type_V) ||
         type_K == GGML_TYPE_IQ4_NL || type_V == GGML_TYPE_IQ4_NL) {
         return false;
     }
-
-#if defined(GGML_CUDA_FA_ALL_QUANTS)
-    return true;
-#else
-    if (type_K == GGML_TYPE_F16 || type_K == GGML_TYPE_BF16 ||
-        type_V == GGML_TYPE_F16 || type_V == GGML_TYPE_BF16) {
-        return type_K == type_V;
+#define CHECK_V(k, v) if (type_V == GGML_TYPE_##v) return ggml_cuda_fa_is_compiled<GGML_TYPE_##k, GGML_TYPE_##v>::value;
+#define CHECK_K(k) if (type_K == GGML_TYPE_##k) { \
+        CHECK_V(k, Q2_0S) CHECK_V(k, Q2_1) CHECK_V(k, Q3_0) CHECK_V(k, Q3_1) \
+        CHECK_V(k, Q4_0) CHECK_V(k, Q4_1) CHECK_V(k, Q5_0) CHECK_V(k, Q5_1) \
+        CHECK_V(k, Q6_0) CHECK_V(k, Q6_1) CHECK_V(k, Q8_0) CHECK_V(k, BF16) CHECK_V(k, F16) \
+        return false; \
     }
-    return ggml_cuda_fattn_default_quant_pair(type_K, type_V);
-#endif
+    CHECK_K(Q2_0S) CHECK_K(Q2_1) CHECK_K(Q3_0) CHECK_K(Q3_1)
+    CHECK_K(Q4_0)  CHECK_K(Q4_1) CHECK_K(Q5_0) CHECK_K(Q5_1)
+    CHECK_K(Q6_0)  CHECK_K(Q6_1) CHECK_K(Q8_0) CHECK_K(BF16)
+    CHECK_K(F16)
+#undef CHECK_V
+#undef CHECK_K
+    return false;
 }
 
 bool ggml_cuda_fa_pair_compiled(ggml_type type_K, ggml_type type_V) {

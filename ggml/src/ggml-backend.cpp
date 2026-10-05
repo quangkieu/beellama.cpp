@@ -1404,7 +1404,6 @@ void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct ggml_cgra
                         break;
                     }
                 }
-                }
             }
 
             if (node_backend_id != cur_backend_id || need_new_split) {

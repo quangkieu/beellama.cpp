@@ -3442,7 +3442,12 @@ bool llama_context::grow_dflash_swa() {
     }
     synchronize();
     ggml_backend_sched_reset(sched.get());
-    gf_res_prev->reset();
+    for (auto & res : gf_res_prev) {
+        if (res) {
+            res->reset();
+        }
+    }
+    gf_res_prev_active = nullptr;
     try {
         return iswa->grow_swa([](llama_memory_i & source, llama_memory_i & destination) {
             llama_io_write_dummy sizing(false);
@@ -4033,8 +4038,8 @@ size_t llama_context::state_seq_set_data(llama_seq_id seq_id, const uint8_t * sr
         }
         return 0;
     }
+    std::unique_ptr<llama_io_read_i> io;
     try {
-        std::unique_ptr<llama_io_read_i> io;
         if (flags & LLAMA_STATE_SEQ_FLAGS_ON_DEVICE) {
             // Read the host header first to select the matching device storage.
             llama_io_read_host header(src, size);
@@ -4068,7 +4073,9 @@ size_t llama_context::state_seq_set_data(llama_seq_id seq_id, const uint8_t * sr
         return nread;
     } catch (const std::exception & err) {
         LLAMA_LOG_ERROR("%s: error loading state: %s\n", __func__, err.what());
-        io->discard();
+        if (io) {
+            io->discard();
+        }
         return 0;
     }
 }

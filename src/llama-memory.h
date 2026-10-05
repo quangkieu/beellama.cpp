@@ -131,6 +131,11 @@ struct llama_memory_i {
     // if data == true, the data buffers will also be cleared together with the metadata
     virtual void clear(bool data) = 0;
 
+    // undo a partial state_read() of seq_id (-1 for the whole memory) that failed to complete
+    virtual void state_clear(llama_seq_id seq_id) {
+        GGML_UNUSED(seq_id);
+    }
+
     virtual bool can_seq_rm(llama_seq_id seq_id, llama_pos p0, llama_pos p1) const {
         GGML_UNUSED(seq_id);
         GGML_UNUSED(p0);
