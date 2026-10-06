@@ -315,9 +315,9 @@ static constexpr __device__ ggml_cuda_mmq_config ggml_cuda_mmq_get_config(ggml_t
         return ggml_cuda_mmq_retag_config(ggml_cuda_mmq_get_config_ampere(config_type, J, fallback), type);
     }
     return ggml_cuda_mmq_retag_config(ggml_cuda_mmq_get_config_blackwell(config_type, J, fallback), type);
-#elif __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
+#elif !defined(GGML_USE_MUSA) && __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
     return ggml_cuda_mmq_retag_config(ggml_cuda_mmq_get_config_ampere(config_type, J, fallback), type);
-#elif __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A
+#elif !defined(GGML_USE_MUSA) && __CUDA_ARCH__ >= GGML_CUDA_CC_DP4A
     return ggml_cuda_mmq_retag_config(ggml_cuda_mmq_get_config_pascal_dp4a(config_type, J, fallback), type);
 #else
     return ggml_cuda_mmq_retag_config(ggml_cuda_mmq_get_config_pascal_older(config_type, J, fallback), type);

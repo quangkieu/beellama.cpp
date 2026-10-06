@@ -13,5 +13,5 @@ void ggml_cuda_op_mul_mat_vec_f(
 
 bool ggml_cuda_mmvf_rhs_compatible(const ggml_tensor * src1);
 
-bool ggml_cuda_should_use_mmvf(enum ggml_type type, int cc, const int64_t * src0_ne, const size_t * src0_nb,
+bool ggml_cuda_should_use_mmvf(enum ggml_type type, int cc, int warp_size, const int64_t * src0_ne, const size_t * src0_nb,
     const ggml_tensor * src1, int64_t ne11);

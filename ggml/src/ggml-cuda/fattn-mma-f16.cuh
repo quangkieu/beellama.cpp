@@ -114,6 +114,9 @@ static constexpr __host__ __device__ fattn_mma_config ggml_cuda_fattn_mma_get_co
 }
 
 static constexpr __host__ __device__ fattn_mma_config ggml_cuda_fattn_mma_get_config_volta(const int DKQ, const int DV, const int ncols) {
+    GGML_CUDA_FATTN_MMA_CONFIG_CASE(320, 256, 32, 128, 2,  32, 128, 128,  64, 1, false);
+    GGML_CUDA_FATTN_MMA_CONFIG_CASE(320, 256, 64, 256, 1,  32, 128, 128,  64, 1, false);
+
     GGML_CUDA_FATTN_MMA_CONFIG_CASE(512, 512,  8,  64, 4,  32, 256, 256,  64, 1, false);
     GGML_CUDA_FATTN_MMA_CONFIG_CASE(512, 512, 16,  64, 4,  32, 256, 256,  64, 1, false);
     GGML_CUDA_FATTN_MMA_CONFIG_CASE(512, 512, 32, 128, 2,  32, 128, 128,  64, 1, false);
@@ -353,6 +356,20 @@ static __host__ int get_cols_per_warp(const int cc) {
     }
 }
 
+static __host__ bool ggml_cuda_fattn_mma_get_swizzled(const int DKQ, const int DV, const int ncols, const int cc) {
+    return turing_mma_available(cc) &&
+        ggml_cuda_fattn_mma_get_nbatch_K2(DKQ, DV, ncols, cc) % 32 == 0 && ggml_cuda_fattn_mma_get_nbatch_V2(DKQ, DV, ncols, cc) % 32 == 0;
+}
+
+static constexpr __device__ bool ggml_cuda_fattn_mma_get_swizzled(const int DKQ, const int DV, const int ncols) {
+#ifdef TURING_MMA_AVAILABLE
+    return ggml_cuda_fattn_mma_get_nbatch_K2(DKQ, DV, ncols) % 32 == 0 && ggml_cuda_fattn_mma_get_nbatch_V2(DKQ, DV, ncols) % 32 == 0;
+#else
+    GGML_UNUSED_VARS(DKQ, DV, ncols);
+    return false;
+#endif // TURING_MMA_AVAILABLE
+}
+
 // ------------------------------------------------------------------------------------------------------------------
 
 static __host__ int ggml_cuda_fattn_mma_get_nstages(const int DKQ, const int DV, const int ncols1, const int ncols2, const int cc) {
@@ -380,7 +397,8 @@ static __device__ __forceinline__ void flash_attn_ext_f16_load_tile(
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
     // K/V data is loaded with decreasing granularity for D for better memory bandwidth.
     // The minimum granularity is 16 bytes.
-    constexpr int h2_per_chunk = 16/sizeof(half2);
+    constexpr int chunk_size = 16;
+    constexpr int h2_per_chunk = chunk_size / sizeof(half2);
     const int chunks_per_row = D2 / h2_per_chunk;
     if constexpr (use_cp_async) {
         static_assert(warp_size == 32, "bad warp_size");
@@ -1045,7 +1063,7 @@ static __device__ __forceinline__ void flash_attn_ext_f16_iter(
                     }
                 }
         }
-        const half2 * tile_V_i = !V_is_K_view || i0_stop > 2*nbatch_K2 ? tile_V : tile_V + i0_start/2;
+        const int tile_V_offset_i = !V_is_K_view || i0_stop > 2*nbatch_K2 ? 0 : i0_start/2;
 
 #if defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE) || defined(AMD_MFMA_AVAILABLE)
 #pragma unroll
@@ -2227,8 +2245,9 @@ void ggml_cuda_flash_attn_ext_mma_f16_case(ggml_backend_cuda_context & ctx, ggml
 #endif // !defined(GGML_USE_MUSA)
     }
 
+    const bool async_kv_preload = nstages == 2 && !use_sparse;
     launch_fattn<DV, ncols1, ncols2>
-        (ctx, dst, fattn_kernel, nwarps, nbytes_shared_total, nbatch_fa, true, true, true, use_sparse, warp_size_host);
+        (ctx, dst, fattn_kernel, nwarps, nbytes_shared_total, nbatch_fa, true, true, true, use_sparse, warp_size_host, async_kv_preload);
 }
 
 
