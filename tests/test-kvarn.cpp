@@ -3,6 +3,7 @@
 #include "llama-memory.h"
 
 #include "ggml-backend.h"
+#include "../ggml/src/ggml-cuda/kvarn-tile.h"
 #include "../ggml/src/ggml-vulkan/fattn-kvarn-route-policy.h"
 
 #include <algorithm>
@@ -5773,6 +5774,41 @@ static void test_meta_kvarn_zero_head_shard() {
     ggml_backend_free(backend);
 }
 
+// The sink is tile 0: it must classify as SINK (never quantized) for every
+// tail window size, and the tier boundaries must match the store kernel's
+// flush/slot gates so the sink stays native in stage slot 0.
+static void test_kv_tier() {
+    // Sink tile is always SINK, independent of tail depth.
+    for (int tail_groups = 1; tail_groups <= 64; ++tail_groups) {
+        require(kvarn_group_tier_for(0, tail_groups) == kv_tier::SINK,
+                "tile 0 must be SINK for every tail window");
+    }
+
+    // Tiles 1..tail_groups are the rotating F16 ring (TAIL).
+    const int tail_groups = 8;
+    for (int group = 1; group <= tail_groups; ++group) {
+        require(kvarn_group_tier_for(group, tail_groups) == kv_tier::TAIL,
+                "tail-window tile must be TAIL");
+    }
+
+    // Tiles beyond the tail window are already quantized (RECORD).
+    for (int group = tail_groups + 1; group < tail_groups + 64; ++group) {
+        require(kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD,
+                "post-tail tile must be RECORD");
+    }
+
+    // The exact boundary: tile == tail_groups is the last TAIL, tile ==
+    // tail_groups + 1 is the first RECORD. This mirrors the kernel gates
+    // (flush on RECORD, eager-skip on SINK).
+    require(kvarn_group_tier_for(tail_groups,     tail_groups) == kv_tier::TAIL,   "boundary: last tail tile");
+    require(kvarn_group_tier_for(tail_groups + 1, tail_groups) == kv_tier::RECORD, "boundary: first record tile");
+
+    // The sink must never be quantized: SINK is excluded from both the flush
+    // gate (== RECORD) and the eager gate (!= SINK).
+    require(kvarn_group_tier_for(0, tail_groups) != kv_tier::RECORD, "sink must not satisfy the flush gate");
+    require(kvarn_group_tier_for(0, tail_groups) ==  kv_tier::SINK,  "sink must satisfy the eager-skip gate");
+}
+
 int main() {
     ggml_backend_load_all();
 
@@ -5843,6 +5879,7 @@ int main() {
     kvarn_planning_reservations_preserve_group_ownership();
     kvarn_stage_assignment_is_collision_free_and_stable();
     kvarn_stage_indices_carry_authoritative_assignment();
+    test_kv_tier();
     test_type_table();
     test_context_route_policy();
     test_attention_domain_policy();
