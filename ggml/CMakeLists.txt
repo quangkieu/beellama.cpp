@@ -205,7 +205,22 @@ option(GGML_CUDA_NO_PEER_COPY               "ggml: do not use peer to peer copie
 option(GGML_CUDA_NO_VMM                     "ggml: do not try to use CUDA VMM"                OFF)
 option(GGML_CUDA_FA                         "ggml: compile ggml FlashAttention CUDA kernels"  ON)
 option(GGML_CUDA_FA_ALL_QUANTS              "ggml: compile full K/V cache quant pair matrix for FlashAttention"     OFF)
-set   (GGML_CUDA_FA_QUANTS "f16-f16;bf16-bf16;q8_0-q8_0;q8_0-q6_0;q6_0-q6_0;q6_0-q5_0;q5_0-q5_0;q5_0-q4_0;q4_0-q4_0;q4_0-q3_0;q3_0-q3_0;q3_0-q2_0s;q2_0s-q2_0s" CACHE STRING
+# ==============================================================================
+# FlashAttention Quant Pairs Lineage:
+#   - Upstream (checkpoint2 / v0.6.0 @ d81235049):
+#       Base FlashAttention standard pairs (f16, bf16, q8_0, q4_0, etc.)
+#   - BeeLlama v0.4.7 (@ f7920911b):
+#       Expanded 13-pair KVarN-rule vector matrix:
+#       "f16-f16;bf16-bf16;q8_0-q8_0;q8_0-q6_0;q6_0-q6_0;q6_0-q5_0;q5_0-q5_0;q5_0-q4_0;q4_0-q4_0;q4_0-q3_0;q3_0-q3_0;q3_0-q2_0s;q2_0s-q2_0s"
+#   - Our Shortlist:
+#       "f16-f16;bf16-bf16;q8_0-q8_0;q4_0-q4_0;q4_0-q3_0;q3_0-q3_0"
+# ==============================================================================
+# [OLD BeeLlama v0.4.7 13-pair FA matrix - Commented Out]:
+# set   (GGML_CUDA_FA_QUANTS "f16-f16;bf16-bf16;q8_0-q8_0;q8_0-q6_0;q6_0-q6_0;q6_0-q5_0;q5_0-q5_0;q5_0-q4_0;q4_0-q4_0;q4_0-q3_0;q3_0-q3_0;q3_0-q2_0s;q2_0s-q2_0s" CACHE STRING
+#                                             "ggml: FlashAttention K-V type combinations to compile, \"all\" or a list such as \"q8_0-q8_0;q8_0-q4_0\"")
+
+# [ACTIVE - Our Shortlist (6 pairs)]:
+set   (GGML_CUDA_FA_QUANTS "f16-f16;bf16-bf16;q8_0-q8_0;q4_0-q4_0;q4_0-q3_0;q3_0-q3_0" CACHE STRING
                                             "ggml: FlashAttention K-V type combinations to compile, \"all\" or a list such as \"q8_0-q8_0;q8_0-q4_0\"")
 option(GGML_CUDA_KVARN                      "ggml: compile CUDA KVarN kernels"                                        ON)
 unset(GGML_CUDA_KVARN_FA CACHE)
@@ -216,27 +231,45 @@ set   (GGML_CUDA_COMPRESSION_MODE "size" CACHE STRING
                                             "ggml: cuda link binary compression mode; CUDA 12.4-12.7 support size via compress-all")
 set_property(CACHE GGML_CUDA_COMPRESSION_MODE PROPERTY STRINGS "none;speed;balance;size")
 
+# ==============================================================================
+# Lineage Attribution:
+#   - Upstream (checkpoint2 / v0.6.0 @ d81235049):
+#       GGML_CUDA_FA base FlashAttention kernels (FP16, BF16, Q8_0, Q4_0).
+#   - BeeLlama v0.4.7 (@ f7920911b):
+#       KVarN dynamic KV quantization and default 15-pair matrix:
+#       k8-v8, k8-v6, k8-v5, k6-v6, k6-v5, k6-v4, k5-v5, k5-v4, k5-v3,
+#       k4-v4, k4-v3, k4-v2, k3-v3, k3-v2, k2-v2 (count: 15).
+#   - Our Shortlist:
+#       Trimmed down to strictly 5 pairs for sm_120a fast compilation:
+#       k8-v8, k6-v6, k4-v4, k4-v3, k3-v3 (count: 5).
+# ==============================================================================
+# [OLD BeeLlama v0.4.7 15-pair configuration - Commented Out]:
+# set(GGML_CUDA_KVARN_DEFAULT_PAIRS
+#     k8-v8 k8-v6 k8-v5
+#     k6-v6 k6-v5 k6-v4
+#     k5-v5 k5-v4 k5-v3
+#     k4-v4 k4-v3 k4-v2
+#     k3-v3 k3-v2 k2-v2
+# )
+# list(LENGTH GGML_CUDA_KVARN_DEFAULT_PAIRS GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT)
+# if (NOT GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT EQUAL 15)
+#     message(FATAL_ERROR "Default KVarN fast decode policy expected 15 pairs, got ${GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT}")
+# endif()
+# ==============================================================================
+
+# [ACTIVE - Our Shortlist (6 pairs)]:
 set(GGML_CUDA_KVARN_DEFAULT_PAIRS
     k8-v8
-    k8-v6
-    k8-v5
     k6-v6
-    k6-v5
-    k6-v4
-    k5-v5
-    k5-v4
-    k5-v3
     k4-v4
     k4-v3
-    k4-v2
     k3-v3
-    k3-v2
     k2-v2
 )
 
 list(LENGTH GGML_CUDA_KVARN_DEFAULT_PAIRS GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT)
-if (NOT GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT EQUAL 15)
-    message(FATAL_ERROR "Default KVarN fast decode policy expected 15 pairs, got ${GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT}")
+if (NOT GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT EQUAL 6)
+    message(FATAL_ERROR "Default KVarN fast decode policy expected 6 pairs, got ${GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT}")
 endif()
 set(GGML_CUDA_KVARN_ALL_PAIR_COUNT 36)
 

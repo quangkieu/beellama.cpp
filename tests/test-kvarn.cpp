@@ -3559,33 +3559,41 @@ static void test_dflash_non_causal_attention_parity() {
         if (backend == nullptr) {
             continue;
         }
+        // ==============================================================================
+        // [OLD TEST CODE - BeeLlama v0.4.7 tested trimmed-out pair 4-2]:
+        // for (const auto bits : { std::pair<int, int>{2, 2}, {4, 2}, {8, 8} }) {
+        //     check(backend, 128, bits.first, bits.second, n_q, 257, true);
+        // }
+        // check(backend, 256, 4, 2, ...);
+        // ==============================================================================
+        // [ACTIVE - Shortlist substitute pairs: 4-4, 4-3, 2-2 for tests only]:
         for (int n_q : { 1, 2, 4, 8, 9, 15, 16 }) {
-            for (const auto bits : { std::pair<int, int>{2, 2}, {4, 2}, {8, 8} }) {
+            for (const auto bits : { std::pair<int, int>{2, 2}, {4, 4}, {6, 6}, {8, 8} }) {
                 check(backend, 128, bits.first, bits.second, n_q, 257, true);
             }
         }
         for (int n_kv : { 127, 128, 129, 255, 256, 257 }) {
-            check(backend, 256, 4, 2, std::min(16, n_kv), n_kv, false);
+            check(backend, 256, 4, 4, std::min(16, n_kv), n_kv, false);
         }
         check(backend, 512, 8, 8, 9, 1024, false);
         check(backend, 128, 4, 4, 4, 257, true, false, 4, false, true);
-        check(backend, 128, 4, 2, 4, 257, true, false, 0, false, false, GGML_TYPE_BF16);
-        check(backend, 256, 4, 2, 9, 1024, true, false, 0, false, false, GGML_TYPE_BF16);
-        check(backend, 256, 4, 2, 9, 257, true, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 384, true, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 512, false, false, 0, false, false, GGML_TYPE_F16);
-        check(backend, 128, 4, 2, 9, 512, false, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 512, false, true, 0, false, false, GGML_TYPE_F16, false, 256);
-        check(backend, 256, 4, 2, 9, 512, false, true, 0, false, false, GGML_TYPE_F16, false);
-        check(backend, 256, 4, 2, 9, 512, false, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 512, true, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 768, true, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 1024, true, true, 0, false, false, GGML_TYPE_F16);
-        check(backend, 256, 4, 2, 9, 1024, true, true, 0, false, false, GGML_TYPE_BF16);
-        check(backend, 256, 4, 2, 9, 1024, true, true, 1, false, false, GGML_TYPE_BF16);
-        check(backend, 256, 4, 2, 9, 1024, true, true, 1, false, true, GGML_TYPE_BF16);
-        check(backend, 512, 4, 2, 9, 512, true, true, 1, false, true, GGML_TYPE_BF16);
-        check(backend, 128, 4, 2, 8, 257, true, true, 0, false, true);
+        check(backend, 128, 4, 4, 4, 257, true, false, 0, false, false, GGML_TYPE_BF16);
+        check(backend, 256, 4, 4, 9, 1024, true, false, 0, false, false, GGML_TYPE_BF16);
+        check(backend, 256, 4, 4, 9, 257, true, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 384, true, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 512, false, false, 0, false, false, GGML_TYPE_F16);
+        check(backend, 128, 4, 4, 9, 512, false, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 512, false, true, 0, false, false, GGML_TYPE_F16, false, 256);
+        check(backend, 256, 4, 4, 9, 512, false, true, 0, false, false, GGML_TYPE_F16, false);
+        check(backend, 256, 4, 4, 9, 512, false, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 512, true, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 768, true, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 1024, true, true, 0, false, false, GGML_TYPE_F16);
+        check(backend, 256, 4, 4, 9, 1024, true, true, 0, false, false, GGML_TYPE_BF16);
+        check(backend, 256, 4, 4, 9, 1024, true, true, 1, false, false, GGML_TYPE_BF16);
+        check(backend, 256, 4, 4, 9, 1024, true, true, 1, false, true, GGML_TYPE_BF16);
+        check(backend, 512, 4, 4, 9, 512, true, true, 1, false, true, GGML_TYPE_BF16);
+        check(backend, 128, 4, 4, 8, 257, true, true, 0, false, true);
         if (backend == gpu_backend) {
             check(backend, 128, 4, 2, 64, 1024, true, false, 0, true, true);
         }
@@ -3622,6 +3630,8 @@ static void test_odd_offset_record_decode_gpu() {
     // Shift the indirect read plan by one absolute row. Decoder-fragment
     // offsets stay even, but each record-backed tile starts at packed position
     // one and therefore exercises odd K indices through the production planner.
+    // [OLD TEST CODE]: for (int bits_k : { 2, 4 }) {
+    // Both 2-2 and 4-4 are supported in our shortlist:
     for (int bits_k : { 2, 4 }) {
         const std::vector<float> expected = test_native_flash_attention_output(
                 gpu_backend, true, true, 256, bits_k, bits_k, 1,

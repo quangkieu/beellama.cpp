@@ -723,7 +723,7 @@ llama_memory_hybrid_idx_context::kpool_access llama_memory_hybrid_idx_context::g
 ggml_tensor * llama_memory_hybrid_idx_context::gather_mla_rows(
         ggml_context * ctx, ggml_tensor * idxs, int64_t n_rows, int64_t n_embd, int32_t il) const {
     GGML_ASSERT(mem != nullptr);
-    ggml_tensor * k = mem->get_mem_attn()->get_k_storage(il);
+    ggml_tensor * k = static_cast<llama_kv_cache *>(mem->get_mem_attn())->get_k_storage(il);
     GGML_ASSERT(k->ne[0] == n_embd);
 
     ggml_tensor * rows = ggml_view_2d(ctx, k, k->ne[0], k->ne[1]*k->ne[2], k->nb[1], 0);

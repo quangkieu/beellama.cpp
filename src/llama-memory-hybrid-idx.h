@@ -131,6 +131,10 @@ public:
     void mem_idx_stale_clear() { mem_idx_stale.fill(POS_CLEAN); }
 
 private:
+    // forget seq_id (all of it if seq_id < 0) in every cache at once, so a failed restore cannot leave the caches out of step
+    // seq_id < 0 drops the whole context, as the caches themselves do on a failed restore
+    void state_drop(llama_seq_id seq_id);
+
     // the indexer cache holds one key head per layer, so it needs its own hparams:
     // llama_kv_cache keeps a reference to what it is given
     llama_hparams hparams_idx;

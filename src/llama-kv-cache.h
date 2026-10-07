@@ -190,9 +190,6 @@ public:
     bool requires_state_for_partial_restore() const override;
     void state_write(llama_io_write_i & io, llama_seq_id seq_id = -1, llama_state_seq_flags flags = 0) const override;
     void state_read (llama_io_read_i  & io, llama_seq_id seq_id = -1, llama_state_seq_flags flags = 0) override;
-    void state_read_sinfo(
-            llama_io_read_i & io, llama_seq_id seq_id, llama_state_seq_flags flags,
-            slot_info_vec_t * sinfos_out, const slot_info_vec_t * sinfos_in);
 
     //
     // llama_kv_cache specific API
