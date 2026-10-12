@@ -169,6 +169,9 @@ std::vector<std::string> server_model_output_modalities(common_decision_type dec
         case COMMON_DECISION_TYPE_NIMBLE:
         case COMMON_DECISION_TYPE_LAYA:
         case COMMON_DECISION_TYPE_CLEF:
+        case COMMON_DECISION_TYPE_PPLX_DECIDER:
+        case COMMON_DECISION_TYPE_LFM2_D1:
+        case COMMON_DECISION_TYPE_LFM2_D1_OMNI:
             return {"decisions"};
         default:
             // fallback when there is no decision type or the metadata is bad
@@ -1427,9 +1430,11 @@ server_tokens tokenize_oai_content_array(const llama_vocab * vocab, mtmd_context
 
 // used by /chat/completions endpoint
 json oaicompat_chat_params_parse(
+    const llama_vocab * vocab,
     json & body, /* openai api json semantics */
     const server_chat_params & opt,
-    std::vector<raw_buffer> & out_files)
+    std::vector<raw_buffer> & out_files,
+    common_chat_session & out_session)
 {
     json llama_params;
 
@@ -1554,7 +1559,6 @@ json oaicompat_chat_params_parse(
         if (body.contains("grammar")) {
             throw std::invalid_argument("Cannot use custom grammar constraints with tools.");
         }
-        llama_params["parse_tool_calls"] = true;
     }
 
     // merge the template args provided from command line with the args provided in the user request
@@ -1588,7 +1592,9 @@ json oaicompat_chat_params_parse(
     inputs.force_pure_content = opt.force_pure_content;
 
     // Apply chat template to the list of messages
-    auto chat_params = common_chat_templates_apply(opt.tmpls.get(), inputs);
+    common_chat_session_params session_params;
+    session_params.echo = json_value(body, "echo", false);
+    out_session = common_chat_session(opt.tmpls.get(), vocab, inputs, session_params);
 
     llama_params["chat_format"] = static_cast<int>(chat_params.format);
     llama_params["prompt"]      = chat_params.prompt;
@@ -1631,10 +1637,10 @@ json oaicompat_chat_params_parse(
             reasoning_budget = opt.reasoning_budget;
         }
 
-        if (!chat_params.thinking_end_tags.empty()) {
+        if (!out_session.thinking_end_tags().empty()) {
             llama_params["reasoning_budget_tokens"] = reasoning_budget;
-            llama_params["reasoning_budget_start_tag"] = chat_params.thinking_start_tag;
-            llama_params["reasoning_budget_end_tags"] = chat_params.thinking_end_tags;
+            llama_params["reasoning_budget_start_tag"] = out_session.thinking_start_tag();
+            llama_params["reasoning_budget_end_tags"] = out_session.thinking_end_tags();
             llama_params["reasoning_budget_message"] = json_value(body, "reasoning_budget_message", opt.reasoning_budget_message);
             llama_params["reasoning_control"] = json_value(body, "reasoning_control", false);
         }
@@ -1659,6 +1665,15 @@ json oaicompat_chat_params_parse(
         if (!llama_params.contains(item.key()) || item.key() == "n_predict") {
             llama_params[item.key()] = item.value();
         }
+    }
+
+    // the session owns these, the server applies them with server_task::apply_chat_session()
+    for (const char * key : { "grammar_lazy", "grammar_triggers", "preserved_tokens" }) {
+        llama_params.erase(key);
+    }
+    if (!out_session.grammar().empty()) {
+        llama_params.erase("grammar");
+        llama_params.erase("json_schema");
     }
 
     return llama_params;
