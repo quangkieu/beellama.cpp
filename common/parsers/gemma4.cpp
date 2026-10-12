@@ -152,7 +152,7 @@ common_chat_params common_chat_params_init_gemma4(const common_chat_template &  
                                                          const autoparser::generation_params & inputs) {
     common_chat_params data;
 
-    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs);
+    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs, std::nullopt, std::nullopt, std::nullopt, &data.prompt_parts);
     data.generation_prompt = common_chat_template_generation_prompt_impl(tmpl, inputs);
 
     if (inputs.add_generation_prompt && string_ends_with(data.prompt, "<turn|>\n")) {
@@ -161,6 +161,7 @@ common_chat_params common_chat_params_init_gemma4(const common_chat_template &  
         // from emitting its proper reasoning token sequence.
         data.generation_prompt = "<|turn>model\n";
         data.prompt += data.generation_prompt;
+        data.prompt_parts.push_back({false, data.generation_prompt});
     }
 
     data.message_delimiters = {
@@ -183,14 +184,25 @@ common_chat_params common_chat_params_init_gemma4(const common_chat_template &  
 
     if (inputs.has_continuation()) {
         const auto & msg = inputs.continue_msg;
+        // Keep the provenance separate: template delimiters vs request-provided
+        // continued content (must not be parsed for special tokens).
+        std::vector<jinja::string_part> gen_parts;
 
-        data.generation_prompt = string_ends_with(data.prompt, "<turn|>\n") ? "<|turn>model\n" : "";
+        const std::string turn_prefix = string_ends_with(data.prompt, "<turn|>\n") ? "<|turn>model\n" : "";
+        data.generation_prompt        = turn_prefix;
+        gen_parts.push_back({false, turn_prefix});
         data.generation_prompt += "<|channel>thought\n" + msg.reasoning_content;
+        gen_parts.push_back({false, "<|channel>thought\n"});
+        gen_parts.push_back({true,  msg.reasoning_content});
         if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
             data.generation_prompt += "<channel|>" + msg.render_content();
+            gen_parts.push_back({false, "<channel|>"});
+            gen_parts.push_back({true,  msg.render_content()});
         }
 
         data.prompt += data.generation_prompt;
+
+        data.prompt_parts.insert(data.prompt_parts.end(), gen_parts.begin(), gen_parts.end());
     }
 
     auto has_tools           = inputs.tools.is_array() && !inputs.tools.empty();

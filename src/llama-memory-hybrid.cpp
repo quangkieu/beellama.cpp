@@ -302,17 +302,9 @@ void llama_memory_hybrid::state_read(llama_io_read_i & io, llama_seq_id seq_id, 
     if (include_attn) {
         mem_attn->state_read(io, seq_id, flags);
     }
-
-    try {
-        mem_recr->state_read(io, seq_id, flags);
-    } catch (...) {
-        // the attention part is already restored - undo it
-        if (include_attn) {
-            mem_attn->state_clear(seq_id);
-        }
-
-        throw;
-    }
+    // Both caches stage changes until the reader commits; a failed recurrent
+    // read must not clear the live attention cache.
+    mem_recr->state_read(io, seq_id, flags);
 }
 
 llama_memory_i * llama_memory_hybrid::get_mem_attn() const {

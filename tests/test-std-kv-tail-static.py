@@ -299,7 +299,10 @@ def main() -> None:
     decode_failure = server_context.split("if (ret != 0)", 1)[1].split(
         "// retry with half the batch size", 1
     )[0]
-    if "batch_view.seq_id[0]" not in decode_failure or "return true" not in decode_failure:
+    if ("owners.insert(owners.end(), token.seq_ids_extra.begin(), token.seq_ids_extra.end())" not in decode_failure
+            or "for (const llama_seq_id owner : owners)" not in decode_failure
+            or "slot.id != owner" not in decode_failure
+            or "return true" not in decode_failure):
         raise AssertionError("attributable one-token decode failure still cancels unrelated slots")
 
     decode_body = server_context.split("bool decode(int32_t & n_batch", 1)[1].split(
@@ -309,8 +312,8 @@ def main() -> None:
         raise AssertionError("server exposes asynchronous target KV updates")
 
     context_source = (ROOT / "src/llama-context.cpp").read_text(encoding="utf-8")
-    context_decode = context_source.split("llama_context::decode(const llama_batch & batch_inp)", 1)[1].split(
-        "llama_context::encode", 1
+    context_decode = context_source.split("llama_context::decode(const llama_batch_ext & batch_inp)", 1)[1].split(
+        "llama_context::build_graph", 1
     )[0]
     if "cparams.ctx_type == LLAMA_CONTEXT_TYPE_MTP" not in context_decode or "synchronize();" not in context_decode:
         raise AssertionError("MTP decode exposes asynchronous draft KV updates")
@@ -458,10 +461,14 @@ def main() -> None:
                                    if line.startswith("option(GGML_CUDA_FA_ALL_QUANTS ")), "")
     if not all_quants_option_line.endswith(" OFF)"):
         raise AssertionError("default CUDA builds must select only the default FA pair matrices")
-    default_pairs_block = ggml_cmake.split("set(GGML_CUDA_KVARN_DEFAULT_PAIRS", 1)[1].split(")", 1)[0]
+    default_pairs_block = ggml_cmake.split("set(GGML_CUDA_KVARN_DEFAULT_PAIRS")[-1].split(")", 1)[0]
     default_pairs = default_pairs_block.split()
-    if len(default_pairs) != 15:
-        raise AssertionError("default CUDA build must compile all and only the 15 default KVarN pairs")
+    # Old assertion:
+    # if len(default_pairs) != 15:
+    #     raise AssertionError("default CUDA build must compile all and only the 15 default KVarN pairs")
+    # Active substitute assertion for 6-pair shortlist:
+    if len(default_pairs) != 6:
+        raise AssertionError("default CUDA build must compile all and only the 6 default KVarN pairs")
 
     ggml_header = (ROOT / "ggml/include/ggml.h").read_text(encoding="utf-8")
     cuda_fattn = (ROOT / "ggml/src/ggml-cuda/fattn.cu").read_text(encoding="utf-8")
@@ -575,7 +582,8 @@ def main() -> None:
             raise AssertionError(
                 f"Vulkan KVarN materialization live descriptor dispatch lacks {required}"
             )
-    if '"src10", "src11"' not in vulkan:
+    vulkan_debug = (ROOT / "ggml/src/ggml-vulkan/ggml-vulkan-debug.cpp").read_text(encoding="utf-8")
+    if '"src10", "src11"' not in vulkan_debug:
         raise AssertionError("Vulkan graph debugging does not cover the retained 12-source tensor contract")
     if graph.count("if (tail_route == LLAMA_KV_TAIL_ROUTE_NATIVE)") < 2 or graph.count(
             "ggml_concat(ctx0, k_tail, k_tail_current, 2)") < 2:

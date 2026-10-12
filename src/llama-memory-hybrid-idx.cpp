@@ -238,21 +238,19 @@ bool llama_memory_hybrid_idx::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_po
         return false;
     }
 
-    // Preflight above makes each mutation valid. Keep the recurrent-first order used by
-    // llama_memory_hybrid, then update both caches before returning success.
+    // Preflight above makes each mutation valid. Keep recurrent-first ordering.
+    if (!get_mem_recr()->seq_rm(seq_id, p0, p1)) {
+        return false;
+    }
     if (mem_idx) {
         const llama_pos stale = mem_idx_stale_pos(seq_id, p0);
-        mem_idx->seq_rm(seq_id, p0, p1);
+        if (!mem_idx->seq_rm(seq_id, p0, p1)) {
+            return false;
+        }
         mem_idx_stale_set(seq_id, stale);
-
-        // removing a sequence can free cells another sequence shared, but only this one is marked stale, so the
-        // survivor would keep shared = true and pin cache_safe off forever; stale every sequence to re-derive it
         if (kpool_layout_shared()) {
             mem_idx_stale_set(-1, 0);
         }
-    }
-    if (!get_mem_recr()->seq_rm(seq_id, p0, p1)) {
-        return false;
     }
     return get_mem_attn()->seq_rm(seq_id, p0, p1);
 }
@@ -325,66 +323,32 @@ void llama_memory_hybrid_idx::state_write(llama_io_write_i & io, llama_seq_id se
 
 void llama_memory_hybrid_idx::state_read(llama_io_read_i & io, llama_seq_id seq_id, llama_state_seq_flags flags) {
     // note: repeats llama_memory_hybrid::state_read
-    // the indexer needs the attention cache's cells, and a half-failed restore must leave all three caches alike
+    // the indexer needs the attention cache's cells; each reader stages its changes on the same IO commit
 
     // [TAG_HYBRID_IDX_SINFO]
     // the indexer restore adopts the attention cache's layout instead of searching for cells of its own
     // two find_slot calls agree only while both caches see the same occupancy, which a restore cannot promise
     llama_kv_cache::slot_info_vec_t sinfos_attn;
 
-    try {
-        const bool read_attn = (flags & LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == 0 ||
-                get_mem_attn()->requires_state_for_partial_restore();
-        if (read_attn) {
-            if (auto * kvarn = dynamic_cast<llama_kv_cache_kvarn *>(get_mem_attn())) {
-                kvarn->state_read_sinfo(io, seq_id, flags, mem_idx ? &sinfos_attn : nullptr, nullptr);
-            } else {
-                static_cast<llama_kv_cache *>(get_mem_attn())->state_read_sinfo(
-                        io, seq_id, flags, mem_idx ? &sinfos_attn : nullptr, nullptr);
-            }
+    const bool read_attn = (flags & LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == 0 ||
+            get_mem_attn()->requires_state_for_partial_restore();
+    if (read_attn) {
+        if (auto * kvarn = dynamic_cast<llama_kv_cache_kvarn *>(get_mem_attn())) {
+            kvarn->state_read_sinfo(io, seq_id, flags, mem_idx ? &sinfos_attn : nullptr, nullptr);
+        } else {
+            static_cast<llama_kv_cache *>(get_mem_attn())->state_read_sinfo(
+                    io, seq_id, flags, mem_idx ? &sinfos_attn : nullptr, nullptr);
         }
-
-        get_mem_recr()->state_read(io, seq_id, flags);
-
-        // [TAG_HYBRID_IDX_STATE] must mirror the write order in state_write
-        if ((flags & LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == 0) {
-            if (mem_idx) {
-                mem_idx->state_read_sinfo(io, seq_id, flags, nullptr, &sinfos_attn);
-                // the restore rewrites the cells behind the pool layout's back
-                mem_idx_stale_set(seq_id, 0);
-                // it can also change which cells are shared; re-derive sharing for every sequence, as seq_rm does
-                if (kpool_layout_shared()) {
-                    mem_idx_stale_set(-1, 0);
-                }
-            }
-        }
-    } catch (...) {
-        // a half-restored context is the one state the indexer cannot fix by itself: attention holds new cells, the indexer old ones
-        // drop what was being restored from all of them, which is a state they do agree on.
-        state_drop(seq_id);
-
-        throw;
     }
-}
-
-void llama_memory_hybrid_idx::state_drop(llama_seq_id seq_id) {
-    // dropped directly, not via seq_rm: the recurrent cache may refuse it and then only the other two get cleared
-    if (seq_id < 0) {
-        clear(true);
-
-        return;
-    }
-
-    get_mem_attn()->state_clear(seq_id);
-    get_mem_recr()->seq_rm(seq_id, -1, -1);
-
-    if (mem_idx) {
-        mem_idx->state_clear(seq_id);
-        mem_idx_stale_set(seq_id, 0);
-        // clearing this sequence can end a sharing the survivor would otherwise keep flagged (see seq_rm)
-        if (kpool_layout_shared()) {
-            mem_idx_stale_set(-1, 0);
-        }
+    get_mem_recr()->state_read(io, seq_id, flags);
+    if ((flags & LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) == 0 && mem_idx) {
+        mem_idx->state_read_sinfo(io, seq_id, flags, nullptr, &sinfos_attn);
+        io.on_commit([this, seq_id]() {
+            mem_idx_stale_set(seq_id, 0);
+            if (kpool_layout_shared()) {
+                mem_idx_stale_set(-1, 0);
+            }
+        });
     }
 }
 
@@ -723,7 +687,9 @@ llama_memory_hybrid_idx_context::kpool_access llama_memory_hybrid_idx_context::g
 ggml_tensor * llama_memory_hybrid_idx_context::gather_mla_rows(
         ggml_context * ctx, ggml_tensor * idxs, int64_t n_rows, int64_t n_embd, int32_t il) const {
     GGML_ASSERT(mem != nullptr);
-    ggml_tensor * k = static_cast<llama_kv_cache *>(mem->get_mem_attn())->get_k_storage(il);
+    const auto * attn_kv = dynamic_cast<const llama_kv_cache *>(mem->get_mem_attn());
+    GGML_ASSERT(attn_kv != nullptr);
+    ggml_tensor * k = attn_kv->get_k_storage(il);
     GGML_ASSERT(k->ne[0] == n_embd);
 
     ggml_tensor * rows = ggml_view_2d(ctx, k, k->ne[0], k->ne[1]*k->ne[2], k->nb[1], 0);

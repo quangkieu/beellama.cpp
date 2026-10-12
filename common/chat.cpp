@@ -931,6 +931,56 @@ static bool string_parts_erase_range(std::vector<jinja::string_part> & parts, si
     return to_drop == 0;
 }
 
+// Replace the occurrence of "from" located at global position pos in the
+// concatenation of parts with "to". The occurrence may span two adjacent
+// parts; the replacement text is placed in the part where the occurrence
+// starts, preserving its is_input provenance.
+// Returns false if the parts do not contain "from" at pos (i.e. they no
+// longer mirror the prompt they were derived from).
+bool string_parts_replace_at(
+        std::vector<jinja::string_part> & parts,
+        size_t                            pos,
+        const std::string &               from,
+        const std::string &               to) {
+    std::string actual;
+    {
+        size_t off = 0;
+        for (const auto & part : parts) {
+            if (actual.size() >= from.size()) {
+                break;
+            }
+            const size_t sz = part.val.size();
+            if (off <= pos && off + sz > pos) {
+                const size_t skip = pos - off;
+                actual += part.val.substr(skip, from.size() - actual.size());
+            }
+            off += sz;
+        }
+    }
+    if (actual != from) {
+        return false;
+    }
+    if (!string_parts_erase_range(parts, pos, from.size())) {
+        return false;
+    }
+    size_t off = 0;
+    for (auto & part : parts) {
+        const size_t sz = part.val.size();
+        if (off == pos) {
+            part.val.insert(0, to);
+            return true;
+        }
+        if (off < pos && pos < off + sz) {
+            part.val.insert(pos - off, to);
+            return true;
+        }
+        off += sz;
+    }
+    // pos is at the very end of the concatenation: append to the last part
+    parts.back().val += to;
+    return true;
+}
+
 std::string common_chat_template_direct_apply_impl(
     const common_chat_template & tmpl,
     const autoparser::generation_params & inputs,

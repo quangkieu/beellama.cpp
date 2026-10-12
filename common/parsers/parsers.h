@@ -32,6 +32,12 @@ std::string common_chat_template_direct_apply_impl(
     const std::optional<json> & additional_context = std::nullopt,
     std::vector<jinja::string_part> * out_parts = nullptr);
 
+bool string_parts_replace_at(
+    std::vector<jinja::string_part> & parts,
+    size_t pos,
+    const std::string & from,
+    const std::string & to);
+
 // the suffix a template appends when add_generation_prompt is set
 std::string common_chat_template_generation_prompt_impl(
     const common_chat_template & tmpl,

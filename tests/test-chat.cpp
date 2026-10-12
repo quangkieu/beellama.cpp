@@ -7082,6 +7082,19 @@ static void test_template_generation_prompt() {
         assert_contains(params.prompt, message_user.content);
         assert_equals(expected_generation_prompt, params.generation_prompt);
         assert_ends_with(params.prompt, expected_generation_prompt);
+
+        std::string reconstructed;
+        std::string input_text;
+        for (const auto & part : params.prompt_parts) {
+            reconstructed += part.val;
+            if (part.is_input) {
+                input_text += part.val;
+            }
+        }
+        assert_equals(params.prompt, reconstructed);
+        if (opts.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
+            assert_contains(input_text, opts.messages.back().render_content());
+        }
     };
 
     {

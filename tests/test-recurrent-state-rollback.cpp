@@ -121,6 +121,17 @@ static double nmse(const float * a, const float * b, int n) {
     return mse_a0 == 0.0 ? (mse_ab == 0.0 ? 0.0 : std::numeric_limits<double>::infinity()) : mse_ab/mse_a0;
 }
 
+// A short first decode must work when the rollback reserve exceeds the batch.
+// Server warmup exercises this shape before the first speculative request.
+static bool test_short_initial_decode(const common_params & params, llama_model * model) {
+    llama_context_ptr ctx = make_ctx(params, model, 0);
+    if (!ctx) {
+        return false;
+    }
+    const std::vector<llama_token> tokens = { 1, 2 };
+    const bool ok = decode_tokens(ctx.get(), tokens) && decode_one(ctx.get(), 3, 2);
+    return ok;
+}
 // Roll back multiple sequences, then replay them in a single batch whose
 // per-seq token count exceeds n_ubatch: each seq's replay spans several
 // ubatches while its rollback restore is still pending. Compared against a
@@ -174,18 +185,19 @@ static test_status test_multi_seq_split_replay(const common_params & params, lla
         return llama_process(ctx, LLAMA_PROCESS_TYPE_DECODE, batch.get()) == 0;
     };
 
-    // both contexts decode the identical [0, p0) prefill; only ctx_roll decodes
-    // the tail, which is then rolled back so its restore is pending at replay
+    // Keep the last rollback window in the same decode request; a split
+    // prefill can leave fewer recurrent snapshots than a rollback needs.
     for (uint32_t s = 0; s < n_seqs && ok; ++s) {
-        ok = ok && decode_range(ctx_roll.get(), s, 0, (llama_pos) p0);
-        ok = ok && decode_range(ctx_ref.get(),  s, 0, (llama_pos) p0);
+        ok = ok && decode_range(ctx_roll.get(), s, 0, (llama_pos) n_prompt);
+        ok = ok && decode_range(ctx_ref.get(), s, 0, p0);
 
-        ok = ok && decode_range(ctx_roll.get(), s, (llama_pos) p0, (llama_pos) n_prompt);
-
-        ok = ok && llama_memory_seq_rm(llama_get_memory(ctx_roll.get()), (llama_seq_id) s, p0, -1);
-
-        // a second partial removal while one is pending must be refused
-        ok = ok && !llama_memory_seq_rm(llama_get_memory(ctx_roll.get()), (llama_seq_id) s, p0 - 1, -1);
+        llama_memory_t memory = llama_get_memory(ctx_roll.get());
+        ok = ok && llama_memory_seq_rm(memory, (llama_seq_id) s, p0, -1);
+        llama_pos planned_p0 = -1;
+        llama_pos planned_p1 = -1;
+        ok = ok && !llama_memory_can_seq_rm(memory, (llama_seq_id) s, p0 - 1, -1);
+        ok = ok && !llama_memory_seq_rm_plan(memory, (llama_seq_id) s, p0 - 1, -1, &planned_p0, &planned_p1);
+        ok = ok && !llama_memory_seq_rm(memory, (llama_seq_id) s, p0 - 1, -1);
     }
     if (!ok) {
         LOG_ERR("%s: multi-seq prefill/rollback failed\n", __func__);
@@ -612,6 +624,10 @@ static test_results run_tests_for_model(const std::string & model_path, const st
         return {};
     }
 
+    if (!test_short_initial_decode(params, model)) {
+        LOG_ERR("%s: short initial recurrent decode failed\n", __func__);
+        return { test_status::FAIL, test_status::FAIL, test_status::FAIL };
+    }
     return run_tests(params, model);
 }
 

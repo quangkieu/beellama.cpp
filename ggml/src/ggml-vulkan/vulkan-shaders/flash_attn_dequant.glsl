@@ -128,6 +128,12 @@ FLOAT_TYPEV4 dequantize4(uint ib, uint iqs, uint a_offset, uint binding_idx) {
             case GGML_TYPE_Q5_1: FA_DEQUANT4_Q5_1(k_packed_q5_1)
             case GGML_TYPE_Q8_0: FA_DEQUANT4_Q8_0(k_packed_q8_0)
             case GGML_TYPE_IQ4_NL: FA_DEQUANT4_IQ4_NL(k_packed_iq4_nl)
+            case GGML_TYPE_Q6_0: FA_DEQUANT4_Q6_0(k_packed_q6_0)
+            case GGML_TYPE_Q6_1: FA_DEQUANT4_Q6_1(k_packed_q6_1)
+            case GGML_TYPE_Q3_0: FA_DEQUANT4_Q3_0(k_packed_q3_0)
+            case GGML_TYPE_Q3_1: FA_DEQUANT4_Q3_1(k_packed_q3_1)
+            case GGML_TYPE_Q2_0S: FA_DEQUANT4_Q2_0S(k_packed_q2_0s)
+            case GGML_TYPE_Q2_1: FA_DEQUANT4_Q2_1(k_packed_q2_1)
             case GGML_TYPE_BF16: FA_DEQUANT4_BF16(k_packed_bf16)
         }
     } else {
@@ -139,6 +145,12 @@ FLOAT_TYPEV4 dequantize4(uint ib, uint iqs, uint a_offset, uint binding_idx) {
             case GGML_TYPE_Q5_1: FA_DEQUANT4_Q5_1(v_packed_q5_1)
             case GGML_TYPE_Q8_0: FA_DEQUANT4_Q8_0(v_packed_q8_0)
             case GGML_TYPE_IQ4_NL: FA_DEQUANT4_IQ4_NL(v_packed_iq4_nl)
+            case GGML_TYPE_Q6_0: FA_DEQUANT4_Q6_0(v_packed_q6_0)
+            case GGML_TYPE_Q6_1: FA_DEQUANT4_Q6_1(v_packed_q6_1)
+            case GGML_TYPE_Q3_0: FA_DEQUANT4_Q3_0(v_packed_q3_0)
+            case GGML_TYPE_Q3_1: FA_DEQUANT4_Q3_1(v_packed_q3_1)
+            case GGML_TYPE_Q2_0S: FA_DEQUANT4_Q2_0S(v_packed_q2_0s)
+            case GGML_TYPE_Q2_1: FA_DEQUANT4_Q2_1(v_packed_q2_1)
             case GGML_TYPE_BF16: FA_DEQUANT4_BF16(v_packed_bf16)
         }
     }

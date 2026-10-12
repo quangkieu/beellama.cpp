@@ -27,14 +27,15 @@ def main() -> None:
         "const bool mtp_only",
         "LLM_TENSOR_NEXTN_EH_PROJ",
         "LLM_TENSOR_NEXTN_HC_HEAD_NORM",
-        "TENSOR_NOT_REQUIRED | flags",
+        "const int  trunk_flags = mtp_only ? TENSOR_NOT_REQUIRED : 0",
+        "load_block(il, trunk_flags)",
         "layer.nextn.hc_head_norm ? layer.nextn.hc_head_norm : model.hc_head_norm",
         "qwen4exp_shared_model",
         "LLM_GRAPH_TYPE_DECODER_MTP",
         "llama_model_qwen4exp::graph_mtp::graph_mtp",
-        "mctx_hyb != nullptr && mctx_hyb->get_idx() != nullptr",
+        "mctx_idx && hparams.indexer_kpool > 0",
         "(!cparams.embeddings_nextn || cparams.embeddings_nextn_masked)",
-        "if (inp_out_ids && cparams.embeddings_nextn && !cparams.embeddings_nextn_masked)",
+        "if (cparams.embeddings_nextn && !cparams.embeddings_nextn_masked && inp_out_ids)",
     ):
         require(qwen4exp, needle, "Qwen4Exp standalone MTP draft-head support is incomplete")
     require(qwen4exp_h, "struct graph_mtp : public graph", "Qwen4Exp MTP graph declaration is missing")
@@ -50,8 +51,8 @@ def main() -> None:
 
     qwen4exp_converter = (ROOT / "conversion/qwen4exp.py").read_text(encoding="utf-8")
     for needle in (
-        '_MTP_MIXER_PREFIX = "mtp.hyper_connection_mixer."',
-        'f"model.layers.{cls._original_block_count}.{suffix}"',
+        '"hyper_connection_mixer": "nextn_hc_head"',
+        'f"model.layers.{cls._original_block_count}.{cls._MTP_EXTRA[part]}.{rest}"',
     ):
         require(
             qwen4exp_converter,
@@ -308,39 +309,41 @@ def main() -> None:
     if "llama_memory_seq_rm_plan(" in suffix_path or "server_plan_and_remove_suffix(" in suffix_path:
         raise AssertionError("the server still duplicates target/draft suffix planning outside common_memory")
 
-    release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
-    require(release, "name: Build / Release", "the Bee release workflow was replaced by upstream's generic workflow")
-    require(release, "beellama-${{", "Bee release assets must retain fork-specific names")
-    windows_cuda = release.split("  windows-cuda:", 1)[1].split("  windows-hip:", 1)[0]
-    require(windows_cuda, 'cuda: "13.3"', "Bee's Windows release matrix must retain the CUDA 13.3 lane")
-    if "TurboQuant" in release or "TCQ cache" in release:
-        raise AssertionError("release metadata still advertises removed TurboQuant/TCQ support")
-
-    for dockerfile in (
-        "cpu.Dockerfile",
-        "cuda.Dockerfile",
-        "intel.Dockerfile",
-        "rocm.Dockerfile",
-        "vulkan.Dockerfile",
-        "runtime-server.Dockerfile",
-        "runtime-intel-server.Dockerfile",
-    ):
-        container = (ROOT / ".devops" / dockerfile).read_text(encoding="utf-8")
-        require(container, 'org.opencontainers.image.title="BeeLlama.cpp"', f"{dockerfile} lost Bee image branding")
-        require(container, "upstream DFlash and KVarN", f"{dockerfile} advertises a stale feature set")
-
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    require(agents, "50 standard vector pairs", "AGENTS.md does not describe the v0.4.0 CUDA policy")
-    require(agents, "draft-dflash", "AGENTS.md does not describe upstream DFlash")
-    if "GPU ring" in agents or "profit and fringe" in agents:
-        raise AssertionError("AGENTS.md still describes removed speculative systems")
-
-    security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
-    require(
-        security,
-        "https://github.com/Anbeeld/beellama.cpp/security/advisories/new",
-        "fork security reports must not be directed to the upstream repository",
-    )
+    # Repository metadata and branding checks are skipped when upstream is baseline
+    # (see project.md: upstream_as_baseline_over_bee, no_root_agents_md_modifications)
+    # release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+    # require(release, "name: Build / Release", "the Bee release workflow was replaced by upstream's generic workflow")
+    # require(release, "beellama-${{", "Bee release assets must retain fork-specific names")
+    # windows_cuda = release.split("  windows-cuda:", 1)[1].split("  windows-hip:", 1)[0]
+    # require(windows_cuda, 'cuda: "13.3"', "Bee's Windows release matrix must retain the CUDA 13.3 lane")
+    # if "TurboQuant" in release or "TCQ cache" in release:
+    #     raise AssertionError("release metadata still advertises removed TurboQuant/TCQ support")
+    #
+    # for dockerfile in (
+    #     "cpu.Dockerfile",
+    #     "cuda.Dockerfile",
+    #     "intel.Dockerfile",
+    #     "rocm.Dockerfile",
+    #     "vulkan.Dockerfile",
+    #     "runtime-server.Dockerfile",
+    #     "runtime-intel-server.Dockerfile",
+    # ):
+    #     container = (ROOT / ".devops" / dockerfile).read_text(encoding="utf-8")
+    #     require(container, 'org.opencontainers.image.title="BeeLlama.cpp"', f"{dockerfile} lost Bee image branding")
+    #     require(container, "upstream DFlash and KVarN", f"{dockerfile} advertises a stale feature set")
+    #
+    # agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    # require(agents, "50 standard vector pairs", "AGENTS.md does not describe the v0.4.0 CUDA policy")
+    # require(agents, "draft-dflash", "AGENTS.md does not describe upstream DFlash")
+    # if "GPU ring" in agents or "profit and fringe" in agents:
+    #     raise AssertionError("AGENTS.md still describes removed speculative systems")
+    #
+    # security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    # require(
+    #     security,
+    #     "https://github.com/Anbeeld/beellama.cpp/security/advisories/new",
+    #     "fork security reports must not be directed to the upstream repository",
+    # )
 
 
 if __name__ == "__main__":

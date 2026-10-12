@@ -16,7 +16,7 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
         adjusted_messages.push_back(msg);
     }
 
-    auto prompt = common_chat_template_direct_apply_impl(tmpl, inputs, /* messages_override= */ adjusted_messages);
+    auto prompt = common_chat_template_direct_apply_impl(tmpl, inputs, /* messages_override= */ adjusted_messages, std::nullopt, std::nullopt, &data.prompt_parts);
 
     // Check if we need to replace the return token with end token during
     // inference and without generation prompt. For more details see:
@@ -26,6 +26,9 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
         static constexpr std::string_view end_token    = "<|end|>";
         if (size_t pos = prompt.rfind(return_token); pos != std::string::npos) {
             prompt.replace(pos, return_token.length(), end_token);
+            if (!string_parts_replace_at(data.prompt_parts, pos, std::string(return_token), std::string(end_token))) {
+                throw std::runtime_error("GPT-OSS prompt parts do not match rendered prompt");
+            }
         }
     }
 
@@ -55,12 +58,24 @@ common_chat_params common_chat_params_init_gpt_oss(const common_chat_template & 
     if (inputs.has_continuation()) {
         const auto & msg = inputs.continue_msg;
 
+        // Keep the provenance of the continuation separate: the channel
+        // delimiters are template text, while the reasoning/content that
+        // comes from the request must not be parsed for special tokens.
+        std::vector<jinja::string_part> gen_parts = {
+            {false, "<|start|>assistant<|channel|>analysis<|message|>"},
+            {true,  msg.reasoning_content},
+        };
+
         data.generation_prompt = "<|start|>assistant<|channel|>analysis<|message|>" + msg.reasoning_content;
         if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
+            gen_parts.push_back({false, "<|end|><|start|>assistant<|channel|>final<|message|>"});
+            gen_parts.push_back({true,  msg.render_content()});
             data.generation_prompt += "<|end|><|start|>assistant<|channel|>final<|message|>" + msg.render_content();
         }
 
         data.prompt += data.generation_prompt;
+
+        data.prompt_parts.insert(data.prompt_parts.end(), gen_parts.begin(), gen_parts.end());
     }
 
     auto has_tools           = inputs.tools.is_array() && !inputs.tools.empty();

@@ -6,7 +6,7 @@ common_chat_params common_chat_params_init_qwen3_coder(const common_chat_templat
 
     const std::string GEN_PREFIX = "<|im_start|>assistant\n";
 
-    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs);
+    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs, std::nullopt, std::nullopt, std::nullopt, &data.prompt_parts);
     data.generation_prompt = common_chat_template_generation_prompt_impl(tmpl, inputs);
     data.format            = COMMON_CHAT_FORMAT_PEG_NATIVE;
 
@@ -46,17 +46,27 @@ common_chat_params common_chat_params_init_qwen3_coder(const common_chat_templat
         const auto & msg = inputs.continue_msg;
 
         data.generation_prompt = GEN_PREFIX;
+        std::vector<jinja::string_part> gen_parts;
+        gen_parts.push_back({false, GEN_PREFIX});
         if (supports_reasoning) {
+            // The delimiters are template text; the continued reasoning/content
+            // is request-provided and must not be parsed for special tokens.
+            gen_parts.push_back({false, "<think>\n"});
+            gen_parts.push_back({true,  msg.reasoning_content});
             data.generation_prompt += "<think>\n" + msg.reasoning_content;
             if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
+                gen_parts.push_back({false, "\n</think>\n\n"});
                 data.generation_prompt += "\n</think>\n\n";
             }
         }
         if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
+            gen_parts.push_back({true, msg.render_content()});
             data.generation_prompt += msg.render_content();
         }
 
         data.prompt += data.generation_prompt;
+
+        data.prompt_parts.insert(data.prompt_parts.end(), gen_parts.begin(), gen_parts.end());
     }
 
     std::vector<std::string> tool_call_starts = { "<tool_call>" };

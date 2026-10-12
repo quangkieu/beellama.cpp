@@ -86,8 +86,65 @@ int llama_batched_bench(int argc, char ** argv) {
 
     common_batch batch(ctx);
 
+    std::unique_ptr<std::ofstream> logits_out;
+    if (!params.batched_bench_logits_out.empty()) {
+        logits_out = std::make_unique<std::ofstream>(
+                params.batched_bench_logits_out, std::ios::binary | std::ios::trunc);
+        if (!*logits_out) {
+            LOG_ERR("failed to open logits output: %s\n", params.batched_bench_logits_out.c_str());
+            llama_free(ctx);
+            llama_model_free(model);
+            return 1;
+        }
+        const char magic[8] = { 'S', 'T', 'T', 'A', 'I', 'L', 'L', 'G' };
+        const uint32_t version = 1;
+        const uint32_t vocab_size = uint32_t(n_vocab);
+        logits_out->write(magic, sizeof(magic));
+        logits_out->write(reinterpret_cast<const char *>(&version), sizeof(version));
+        logits_out->write(reinterpret_cast<const char *>(&vocab_size), sizeof(vocab_size));
+    }
+
+    int32_t current_pp = -1;
+    int32_t current_tg = -1;
+    int32_t current_pl = -1;
+
+    const auto write_logits = [&](llama_context * decode_ctx, const common_batch & decoded, int32_t off, int32_t count) {
+        if (!logits_out || current_pl < 0) {
+            return;
+        }
+        for (int32_t i = 0; i < count; ++i) {
+            if (!decoded.tokens[off + i].output) {
+                continue;
+            }
+            const float * row = llama_get_logits_ith(decode_ctx, i);
+            bool finite = row != nullptr;
+            int32_t top = -1;
+            float top_value = -std::numeric_limits<float>::infinity();
+            for (int32_t token = 0; row && token < n_vocab; ++token) {
+                finite = finite && std::isfinite(row[token]);
+                if (row[token] > top_value) {
+                    top_value = row[token];
+                    top = token;
+                }
+            }
+            const int32_t seq_id = decoded.tokens[off + i].seq_id;
+            const int32_t position = decoded.tokens[off + i].pos[0];
+            const int32_t finite_i = finite ? 1 : 0;
+            const int32_t vocab_i = n_vocab;
+            for (const int32_t value : { current_pp, current_tg, current_pl, seq_id, position, finite_i, top, vocab_i }) {
+                logits_out->write(reinterpret_cast<const char *>(&value), sizeof(value));
+            }
+            if (row) {
+                logits_out->write(reinterpret_cast<const char *>(row), size_t(n_vocab)*sizeof(float));
+            } else {
+                std::vector<float> missing(size_t(n_vocab), std::numeric_limits<float>::quiet_NaN());
+                logits_out->write(reinterpret_cast<const char *>(missing.data()), missing.size()*sizeof(float));
+            }
+        }
+    };
+
     // decode in batches of ctx_params.n_batch tokens
-    auto decode_helper = [](llama_context * ctx, common_batch & batch, int32_t n_batch, bool synchronize) {
+    auto decode_helper = [&](llama_context * ctx, common_batch & batch, int32_t n_batch, bool synchronize) {
         for (int32_t i = 0; i < batch.size(); i += n_batch) {
             const int32_t n_tokens = std::min(n_batch, batch.size() - i);
 
@@ -97,9 +154,10 @@ int llama_batched_bench(int argc, char ** argv) {
                 return false;
             }
 
-            if (synchronize) {
+            if (synchronize || logits_out) {
                 llama_synchronize(ctx);
             }
+            write_logits(ctx, batch, i, n_tokens);
         }
 
         return true;
@@ -183,7 +241,7 @@ int llama_batched_bench(int argc, char ** argv) {
                     if (!params.kv_unified) {
                         // run one dummy token to apply the memory copy
                         batch.clear();
-                        batch.add(get_token(0, pp), pp + 0, 0, true);
+                        batch.add(get_token(0, pp), pp, 0, true);
                         if (!decode_helper(ctx, batch, ctx_params.n_batch, true)) {
                             LOG_ERR("%s: llama_decode() failed\n", __func__);
                             llama_free(ctx);

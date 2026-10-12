@@ -29,9 +29,6 @@ public:
     virtual void read(void * dst, size_t size) = 0;
     virtual void read_tensor(ggml_tensor * tensor, size_t offset, size_t size) = 0;
 
-    // drop tensor data that has been read but not yet applied (e.g. when a restore fails)
-    virtual void discard() {}
-
     // State restore is a transaction. Tensor writes and publication callbacks
     // are prepared while the frame is parsed, then made visible only after the
     // complete frame has validated. Destruction without commit cancels them.
@@ -40,6 +37,7 @@ public:
     virtual void on_commit(std::function<void()> callback) = 0;
     virtual void commit() = 0;
     virtual void cancel() = 0;
+    virtual void discard() { cancel(); }
 
     // bytes read so far
     virtual size_t n_bytes() = 0;

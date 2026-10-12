@@ -6,7 +6,7 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
                                                           const autoparser::generation_params & inputs) {
     common_chat_params data;
 
-    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs);
+    data.prompt            = common_chat_template_direct_apply_impl(tmpl, inputs, std::nullopt, std::nullopt, std::nullopt, &data.prompt_parts);
     data.generation_prompt = common_chat_template_generation_prompt_impl(tmpl, inputs);
     data.format            = COMMON_CHAT_FORMAT_PEG_NATIVE;
     data.supports_thinking = true;
@@ -39,13 +39,22 @@ common_chat_params common_chat_params_init_kimi_k2(const common_chat_template & 
 
     if (inputs.has_continuation()) {
         const auto & msg = inputs.continue_msg;
+        // Keep the provenance separate: template delimiters vs request-provided
+        // continued content (must not be parsed for special tokens).
+        std::vector<jinja::string_part> gen_parts;
 
         data.generation_prompt = GEN_PROMPT + THINK_START + msg.reasoning_content;
+        gen_parts.push_back({false, GEN_PROMPT + THINK_START});
+        gen_parts.push_back({true,  msg.reasoning_content});
         if (inputs.continue_final_message == COMMON_CHAT_CONTINUATION_CONTENT) {
             data.generation_prompt += THINK_END + msg.render_content();
+            gen_parts.push_back({false, THINK_END});
+            gen_parts.push_back({true,  msg.render_content()});
         }
 
         data.prompt += data.generation_prompt;
+
+        data.prompt_parts.insert(data.prompt_parts.end(), gen_parts.begin(), gen_parts.end());
     }
 
     auto parser = build_chat_peg_parser([&](common_chat_peg_builder & p) {
