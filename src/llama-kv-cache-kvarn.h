@@ -358,6 +358,8 @@ private:
         uint32_t head_dim_v;
         uint32_t k_slices;
         uint32_t v_slices;
+        int key_bits;
+        int value_bits;
         bool native_attention;
         ggml_backend_dev_t native_attention_owner;
         bool mixed_tail_native;

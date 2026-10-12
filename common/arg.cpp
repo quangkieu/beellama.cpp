@@ -1445,10 +1445,12 @@ static void common_kvarn_pair_normalize(
     int32_t key_bits = cache_kvarn_bits_k;
     int32_t value_bits = cache_kvarn_bits_v;
     const uint32_t window_chunk = kvarn.window_chunk;
+    const bool ushape = kvarn.ushape;
 
     if (key_bits == 0 && value_bits == 0) {
         kvarn = llama_kvarn_default_params();
         kvarn.window_chunk = window_chunk;
+        kvarn.ushape = ushape;
         return;
     }
 
@@ -1470,6 +1472,7 @@ static void common_kvarn_pair_normalize(
 
     kvarn = llama_kvarn_params_for_type(type);
     kvarn.window_chunk = window_chunk;
+    kvarn.ushape = ushape;
     cache_kvarn_bits_k = key_bits;
     cache_kvarn_bits_v = value_bits;
     cache_type_k = kvarn_fallback_cache_type(key_bits);
@@ -2750,6 +2753,14 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.kvarn.window_chunk = static_cast<uint32_t>(value);
         }
     ).set_env("LLAMA_ARG_KVARN_WINDOW_CHUNK"));
+    add_opt(common_arg(
+        {"--kvarn-ushape"},
+        {"--no-kvarn-ushape"},
+        "enable U-shape layer-adaptive KV cache quantization ladder for KVarN middle layers (default: disabled)",
+        [](common_params & params, bool value) {
+            params.kvarn.ushape = value;
+        }
+    ).set_env("LLAMA_ARG_KVARN_USHAPE"));
     add_opt(common_arg(
         {"--kv-tail-tokens"}, "SPEC",
         "exact KV-cache tail: 0, auto, N, positional list, or named group list\n"

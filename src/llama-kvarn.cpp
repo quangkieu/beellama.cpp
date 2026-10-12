@@ -177,6 +177,51 @@ static size_t llama_kvarn_align_up(size_t value, size_t alignment) {
     return (value + alignment - 1) / alignment * alignment;
 }
 
+kvarn_bit_pair llama_kvarn_resolve_ushape_pair(
+        uint32_t il,
+        uint32_t n_layer,
+        int user_key_bits,
+        int user_value_bits) {
+    uint32_t n_top    = std::max(4u, (uint32_t) std::round(n_layer * 0.05f));
+    uint32_t n_bottom = std::max(8u, (uint32_t) std::round(n_layer * 0.15f));
+    if (n_top + n_bottom >= n_layer) {
+        n_top    = std::max(1u, n_layer / 4);
+        n_bottom = std::max(2u, n_layer / 2);
+    }
+
+    if (il < n_top || il >= n_layer - n_bottom) {
+        return { user_key_bits, user_value_bits };
+    }
+
+    std::vector<kvarn_bit_pair> available_pairs;
+    available_pairs.push_back({ user_key_bits, user_value_bits });
+
+    const int max_equal = (user_key_bits == user_value_bits)
+        ? user_key_bits - 1
+        : std::min(user_key_bits, user_value_bits);
+    for (int b : { 8, 6, 4, 3, 2 }) {
+        if (b <= max_equal && b >= 2) {
+            available_pairs.push_back({ b, b });
+        }
+    }
+
+    if (available_pairs.size() <= 1) {
+        return available_pairs[0];
+    }
+
+    const uint32_t mid_start = n_top;
+    const uint32_t mid_len   = n_layer - n_bottom - n_top;
+    const uint32_t rel_idx   = il - mid_start;
+    const uint32_t dist      = std::min(rel_idx, mid_len - 1 - rel_idx);
+    const uint32_t half_len  = (mid_len + 1) / 2;
+
+    uint32_t tier = (dist * (uint32_t) available_pairs.size()) / half_len;
+    if (tier >= available_pairs.size()) {
+        tier = (uint32_t) available_pairs.size() - 1;
+    }
+    return available_pairs[tier];
+}
+
 const char * llama_kvarn_type_name(llama_kvarn_type type) {
     const auto * desc = llama_kvarn_type_desc_from_type(type);
     return desc ? desc->name : "invalid";
@@ -199,6 +244,7 @@ llama_kvarn_params llama_kvarn_default_params() {
         /*.sink_tokens         =*/ 128,
         /*.window_chunk        =*/ 0,
         /*.fail_if_unsupported =*/ true,
+        /*.ushape              =*/ false,
     };
 }
 

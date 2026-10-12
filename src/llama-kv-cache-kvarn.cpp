@@ -1498,8 +1498,19 @@ llama_kv_cache_kvarn::llama_kv_cache_kvarn(
         const int v_slices = int(v_geometry.head_slices);
         const int k_record_dim = int(k_geometry.record_dim);
         const int v_record_dim = int(v_geometry.record_dim);
-        const size_t k_record_size = kvarn_record_bytes(k_record_dim, this->params.key_bits, false);
-        const size_t v_record_size = kvarn_record_bytes(v_record_dim, this->params.value_bits, true);
+        int layer_key_bits   = this->params.key_bits;
+        int layer_value_bits = this->params.value_bits;
+        if (swa && hparams.is_swa(il) && this->params.swa_key_bits != 0) {
+            layer_key_bits   = this->params.swa_key_bits;
+            layer_value_bits = this->params.swa_value_bits;
+        } else if (this->params.ushape && !hparams.is_swa(il)) {
+            const auto resolved = llama_kvarn_resolve_ushape_pair(
+                    il, hparams.n_layer_all, this->params.key_bits, this->params.value_bits);
+            layer_key_bits   = resolved.k_bits;
+            layer_value_bits = resolved.v_bits;
+        }
+        const size_t k_record_size = kvarn_record_bytes(k_record_dim, layer_key_bits, false);
+        const size_t v_record_size = kvarn_record_bytes(v_record_dim, layer_value_bits, true);
         const bool explicit_bias = model.self_attention_uses_explicit_bias(il);
         const bool native_tail = exact_tail_tokens == 0 ||
             (!explicit_bias && kvarn_backend_supports_native_tail(
@@ -1578,6 +1589,8 @@ llama_kv_cache_kvarn::llama_kv_cache_kvarn(
             head_dim_v,
             (uint32_t) k_slices,
             (uint32_t) v_slices,
+            layer_key_bits,
+            layer_value_bits,
             native_attention,
             dev,
             mixed_tail_native,
@@ -3159,7 +3172,7 @@ ggml_tensor * llama_kv_cache_kvarn::store(
         indices,
         value ? layer.v_stage : layer.k_stage,
         value ? layer.v_records : layer.k_records,
-        value ? params.value_bits : params.key_bits,
+        value ? layer.value_bits : layer.key_bits,
         params.sinkhorn_iters,
         value,
         int32_t(stage_groups));
@@ -3192,7 +3205,7 @@ ggml_tensor * llama_kv_cache_kvarn::view(
         n_kv,
         stream_start,
         stream_count,
-        value ? params.value_bits : params.key_bits,
+        value ? layer.value_bits : layer.key_bits,
         value,
         int32_t(stage_groups));
     result->op_params[6] = swa ? 1 : 0;
@@ -3236,7 +3249,7 @@ ggml_tensor * llama_kv_cache_kvarn::materialize(
         n_kv,
         stream_start,
         stream_count,
-        value ? params.value_bits : params.key_bits,
+        value ? layer.value_bits : layer.key_bits,
         value,
         int32_t(stage_groups));
     // Materialized fallback attention stays in the same rotated domain as the

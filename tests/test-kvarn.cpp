@@ -6088,6 +6088,50 @@ static void test_headwide_multistream_store() {
     ggml_backend_free(backend);
 }
 
+static void test_ushape_pair_resolution() {
+    require(llama_kvarn_default_params().ushape == false,
+            "U-shape ladder must be disabled by default");
+
+    const uint32_t n_layer = 40;
+    const int user_k = 4;
+    const int user_v = 3;
+
+    // Top edge and bottom edge retain the user KV pair.
+    const auto top = llama_kvarn_resolve_ushape_pair(0, n_layer, user_k, user_v);
+    require(top.k_bits == user_k && top.v_bits == user_v, "top edge must keep user KV pair");
+    const auto bottom = llama_kvarn_resolve_ushape_pair(n_layer - 1, n_layer, user_k, user_v);
+    require(bottom.k_bits == user_k && bottom.v_bits == user_v, "bottom edge must keep user KV pair");
+
+    // Middle layers only use the first tier or strictly equal pairs.
+    for (uint32_t il = 4; il < n_layer - 8; ++il) {
+        const auto p = llama_kvarn_resolve_ushape_pair(il, n_layer, user_k, user_v);
+        require((p.k_bits == user_k && p.v_bits == user_v) || (p.k_bits == p.v_bits),
+                "middle layers only use the user pair or a strictly equal pair");
+    }
+
+    // Dead center reaches { 2, 2 }.
+    const uint32_t mid_start = 4;
+    const uint32_t mid_len = n_layer - 8 - mid_start;
+    const uint32_t center = mid_start + mid_len / 2;
+    const auto center_pair = llama_kvarn_resolve_ushape_pair(center, n_layer, user_k, user_v);
+    require(center_pair.k_bits == 2 && center_pair.v_bits == 2, "dead center must reach {2,2}");
+
+    // Symmetry across middle layers.
+    for (uint32_t i = 0; i < mid_len; ++i) {
+        const auto a = llama_kvarn_resolve_ushape_pair(mid_start + i, n_layer, user_k, user_v);
+        const auto b = llama_kvarn_resolve_ushape_pair(mid_start + (mid_len - 1 - i), n_layer, user_k, user_v);
+        require(a.k_bits == b.k_bits && a.v_bits == b.v_bits, "middle layers must be symmetric");
+    }
+
+    // Small layer counts guard gracefully without crashing.
+    for (uint32_t n : { 12, 8 }) {
+        for (uint32_t il = 0; il < n; ++il) {
+            const auto p = llama_kvarn_resolve_ushape_pair(il, n, user_k, user_v);
+            require(p.k_bits > 0 && p.v_bits > 0, "small layer counts must resolve a valid pair");
+        }
+    }
+}
+
 int main() {
     ggml_backend_load_all();
 
@@ -6170,6 +6214,7 @@ int main() {
     test_kv_tier();
     test_type_table();
     test_context_route_policy();
+    test_ushape_pair_resolution();
     test_attention_domain_policy();
     test_vulkan_decode_route_policy();
     test_stage_policy();

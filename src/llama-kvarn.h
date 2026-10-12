@@ -56,6 +56,17 @@ struct llama_kvarn_type_desc {
     int group;
 };
 
+struct kvarn_bit_pair {
+    int k_bits;
+    int v_bits;
+};
+
+kvarn_bit_pair llama_kvarn_resolve_ushape_pair(
+        uint32_t il,
+        uint32_t n_layer,
+        int user_key_bits,
+        int user_value_bits);
+
 struct llama_kvarn_geometry {
     uint32_t token_group;
     uint32_t record_dim;
