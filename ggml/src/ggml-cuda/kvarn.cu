@@ -1031,7 +1031,7 @@ static __global__ void kvarn_store_kernel_hishmem(
         }
 
         const int stage_base = stream * KVAR_N_DIM * stage_groups;
-        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD)) {
+        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : group_zone_for(group, tail_groups) == ZONE_RECORD)) {
             const int flush_group = group - tail_groups;
             const int flush_ring = swa ? flush_group % groups_per_stream : flush_group;
             const int flush_record_group = stream * groups_per_stream + flush_ring;
@@ -1048,7 +1048,7 @@ static __global__ void kvarn_store_kernel_hishmem(
         stage[(stage_pos * n_heads + head) * KVAR_N_DIM + threadIdx.x] =
             __float2half_rn(shared[threadIdx.x]);
         __syncthreads();
-        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || kvarn_group_tier_for(group, tail_groups) != kv_tier::SINK)) {
+        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || group_zone_for(group, tail_groups) != ZONE_SINK)) {
             const int record_ring = swa ? group % groups_per_stream : group;
             const int record_group = stream * groups_per_stream + record_ring;
             uint8_t * record = records + ((int64_t) record_group * n_heads + head) * record_bytes;
@@ -1124,7 +1124,7 @@ static __global__ void kvarn_store_kernel_headwide(
         }
 
         const int stage_base = stream * KVAR_N_DIM * stage_groups;
-        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD)) {
+        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : group_zone_for(group, tail_groups) == ZONE_RECORD)) {
             const int flush_group = group - tail_groups;
             const int flush_ring = swa ? flush_group % groups_per_stream : flush_group;
             const int flush_record_group = stream * groups_per_stream + flush_ring;
@@ -1155,7 +1155,7 @@ static __global__ void kvarn_store_kernel_headwide(
                 __float2half_rn(values[slice]);
         }
         __syncthreads();
-        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || kvarn_group_tier_for(group, tail_groups) != kv_tier::SINK)) {
+        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || group_zone_for(group, tail_groups) != ZONE_SINK)) {
             const int record_ring = swa ? group % groups_per_stream : group;
             const int record_group = stream * groups_per_stream + record_ring;
             for (int slice = 0; slice < head_slices; ++slice) {
@@ -1205,7 +1205,7 @@ static __global__ void kvarn_store_kernel_lowshmem(
         }
 
         const int stage_base = stream * KVAR_N_DIM * stage_groups;
-        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD)) {
+        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : group_zone_for(group, tail_groups) == ZONE_RECORD)) {
             const int flush_group = group - tail_groups;
             const int flush_ring = swa ? flush_group % groups_per_stream : flush_group;
             const int flush_record_group = stream * groups_per_stream + flush_ring;
@@ -1236,7 +1236,7 @@ static __global__ void kvarn_store_kernel_lowshmem(
                 __float2half_rn(values[slice]);
         }
         __syncthreads();
-        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || kvarn_group_tier_for(group, tail_groups) != kv_tier::SINK)) {
+        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || group_zone_for(group, tail_groups) != ZONE_SINK)) {
             const int record_ring = swa ? group % groups_per_stream : group;
             const int record_group = stream * groups_per_stream + record_ring;
             for (int slice = 0; slice < head_slices; ++slice) {
@@ -1994,7 +1994,7 @@ static __global__ void kvarn_d64_store_kernel(
         const int group = swa ? group_global : group_global - stream * groups_per_stream;
         const int stage_base = stream * KVAR_N_DIM * stage_groups;
 
-        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD)) {
+        if (!eager_records && pos == 0 && (swa ? group >= tail_groups : group_zone_for(group, tail_groups) == ZONE_RECORD)) {
             const int flush_group = group - tail_groups;
             const int flush_ring = swa ? flush_group % groups_per_stream : flush_group;
             const int flush_record_group = stream * groups_per_stream + flush_ring;
@@ -2016,7 +2016,7 @@ static __global__ void kvarn_d64_store_kernel(
         }
         __syncthreads();
 
-        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || kvarn_group_tier_for(group, tail_groups) != kv_tier::SINK)) {
+        if (eager_records && pos == KVAR_N_DIM - 1 && (swa || group_zone_for(group, tail_groups) != ZONE_SINK)) {
             const int record_ring = swa ? group % groups_per_stream : group;
             const int record_group = stream * groups_per_stream + record_ring;
             uint8_t * record = records + ((int64_t) record_group * n_heads + head) * record_bytes;

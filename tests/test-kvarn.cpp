@@ -5850,35 +5850,35 @@ static void test_meta_kvarn_zero_head_shard() {
 // tail window size, and the tier boundaries must match the store kernel's
 // flush/slot gates so the sink stays native in stage slot 0.
 static void test_kv_tier() {
-    // Sink tile is always SINK, independent of tail depth.
+    // Sink tile is always ZONE_SINK, independent of tail depth.
     for (int tail_groups = 1; tail_groups <= 64; ++tail_groups) {
-        require(kvarn_group_tier_for(0, tail_groups) == kv_tier::SINK,
-                "tile 0 must be SINK for every tail window");
+        require(group_zone_for(0, tail_groups) == ZONE_SINK,
+                "tile 0 must be ZONE_SINK for every tail window");
     }
 
-    // Tiles 1..tail_groups are the rotating F16 ring (TAIL).
+    // Tiles 1..tail_groups are the rotating F16 ring (ZONE_TAIL).
     const int tail_groups = 8;
     for (int group = 1; group <= tail_groups; ++group) {
-        require(kvarn_group_tier_for(group, tail_groups) == kv_tier::TAIL,
-                "tail-window tile must be TAIL");
+        require(group_zone_for(group, tail_groups) == ZONE_TAIL,
+                "tail-window tile must be ZONE_TAIL");
     }
 
-    // Tiles beyond the tail window are already quantized (RECORD).
+    // Tiles beyond the tail window are already quantized (ZONE_RECORD).
     for (int group = tail_groups + 1; group < tail_groups + 64; ++group) {
-        require(kvarn_group_tier_for(group, tail_groups) == kv_tier::RECORD,
-                "post-tail tile must be RECORD");
+        require(group_zone_for(group, tail_groups) == ZONE_RECORD,
+                "post-tail tile must be ZONE_RECORD");
     }
 
-    // The exact boundary: tile == tail_groups is the last TAIL, tile ==
-    // tail_groups + 1 is the first RECORD. This mirrors the kernel gates
-    // (flush on RECORD, eager-skip on SINK).
-    require(kvarn_group_tier_for(tail_groups,     tail_groups) == kv_tier::TAIL,   "boundary: last tail tile");
-    require(kvarn_group_tier_for(tail_groups + 1, tail_groups) == kv_tier::RECORD, "boundary: first record tile");
+    // The exact boundary: tile == tail_groups is the last ZONE_TAIL, tile ==
+    // tail_groups + 1 is the first ZONE_RECORD. This mirrors the kernel gates
+    // (flush on ZONE_RECORD, eager-skip on ZONE_SINK).
+    require(group_zone_for(tail_groups,     tail_groups) == ZONE_TAIL,   "boundary: last tail tile");
+    require(group_zone_for(tail_groups + 1, tail_groups) == ZONE_RECORD, "boundary: first record tile");
 
-    // The sink must never be quantized: SINK is excluded from both the flush
-    // gate (== RECORD) and the eager gate (!= SINK).
-    require(kvarn_group_tier_for(0, tail_groups) != kv_tier::RECORD, "sink must not satisfy the flush gate");
-    require(kvarn_group_tier_for(0, tail_groups) ==  kv_tier::SINK,  "sink must satisfy the eager-skip gate");
+    // The sink must never be quantized: ZONE_SINK is excluded from both the flush
+    // gate (== ZONE_RECORD) and the eager gate (!= ZONE_SINK).
+    require(group_zone_for(0, tail_groups) != ZONE_RECORD, "sink must not satisfy the flush gate");
+    require(group_zone_for(0, tail_groups) ==  ZONE_SINK,  "sink must satisfy the eager-skip gate");
 }
 
 // Qualifies SWA record-native attention independently of the cache route gate.
