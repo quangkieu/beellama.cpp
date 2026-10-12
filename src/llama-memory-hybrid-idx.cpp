@@ -248,9 +248,6 @@ bool llama_memory_hybrid_idx::seq_rm(llama_seq_id seq_id, llama_pos p0, llama_po
             return false;
         }
         mem_idx_stale_set(seq_id, stale);
-        if (kpool_layout_shared()) {
-            mem_idx_stale_set(-1, 0);
-        }
     }
     return get_mem_attn()->seq_rm(seq_id, p0, p1);
 }
@@ -348,9 +345,6 @@ void llama_memory_hybrid_idx::state_read(llama_io_read_i & io, llama_seq_id seq_
         mem_idx->state_read_sinfo(io, seq_id, flags, nullptr, &sinfos_attn);
         io.on_commit([this, seq_id]() {
             mem_idx_stale_set(seq_id, 0);
-            if (kpool_layout_shared()) {
-                mem_idx_stale_set(-1, 0);
-            }
         });
     }
 }
@@ -442,10 +436,6 @@ const llama_memory_hybrid_idx::kpool_layout & llama_memory_hybrid_idx::kpool_lay
     GGML_ASSERT(kpool_lay != nullptr);
 
     return *kpool_lay;
-}
-
-bool llama_memory_hybrid_idx::kpool_layout_shared() const {
-    return kpool_lay && !kpool_lay->cache_safe;
 }
 
 // Pools are fixed by the positions relative to the sequence's first one, so the layout survives a plain

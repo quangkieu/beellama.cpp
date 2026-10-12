@@ -458,13 +458,6 @@ llama_model_qwen4exp::graph::graph(const llama_model & model, const llm_graph_pa
     ggml_tensor * inp_pos     = build_inp_pos();
     ggml_tensor * inp_out_ids = build_inp_out_ids();
 
-    ggml_tensor * ple_emb = nullptr;
-    if (hparams.ple_n_heads > 0) {
-        ple_emb = build_inp_ple(inp->mctx);
-        // make sure ple_emb and build_inp_embd are in the same graph split
-        ggml_build_forward_expand(gf, ple_emb);
-    }
-
     // the wide residual starts as hc identical copies of the embedding
     ggml_tensor * res_hc = ggml_repeat_4d(ctx0,
             ggml_reshape_3d(ctx0, inpL, n_embd, 1, n_tokens),

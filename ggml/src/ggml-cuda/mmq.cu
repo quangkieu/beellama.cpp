@@ -14,11 +14,11 @@ static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, con
             mul_mat_q_case<GGML_TYPE_Q2_0, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_PQ2_0:
-            mul_mat_q_case<GGML_TYPE_PQ2_0>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_PQ2_0, GGML_PREC_Q8>(ctx, args, stream);
             break;
 #if !defined(GGML_USE_HIP)
         case GGML_TYPE_PTQ1_0:
-            mul_mat_q_case<GGML_TYPE_PTQ1_0>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_PTQ1_0, GGML_PREC_Q8>(ctx, args, stream);
             break;
 #endif
         case GGML_TYPE_Q4_0:
@@ -34,22 +34,22 @@ static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, con
             mul_mat_q_case<GGML_TYPE_Q5_1, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q6_0:
-            mul_mat_q_case<GGML_TYPE_Q6_0>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q6_0, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q6_1:
-            mul_mat_q_case<GGML_TYPE_Q6_1>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q6_1, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q3_0:
-            mul_mat_q_case<GGML_TYPE_Q3_0>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q3_0, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q3_1:
-            mul_mat_q_case<GGML_TYPE_Q3_1>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q3_1, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q2_0S:
-            mul_mat_q_case<GGML_TYPE_Q2_0S>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q2_0S, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q2_1:
-            mul_mat_q_case<GGML_TYPE_Q2_1>(ctx, args, stream);
+            mul_mat_q_case<GGML_TYPE_Q2_1, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_Q8_0:
             mul_mat_q_case<GGML_TYPE_Q8_0, GGML_PREC_Q8>(ctx, args, stream);

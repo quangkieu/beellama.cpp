@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #define MMQ_DP4A_MAX_BATCH_SIZE 64 // Max. batch size to use for dp4a MMQ kernels when FP16 tensor cores are available.
+#define MMQ_PTQ1_0_MAX_BATCH_SIZE (1 << 30) // MMQ at every batch unless GGML_CUDA_PTQ1_0_MMQ_MAX_BATCH lowers it
 #define MMQ_ITER_K             256
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
@@ -1237,7 +1238,7 @@ static __global__ void mul_mat_q(
         return;
     }
 
-    constexpr int ITER_K          = ggml_cuda_mmq_get_K_vram(type, J, fallback);
+    constexpr int ITER_K          = ggml_cuda_mmq_get_K_vram(type, J, fallback, prec_src1);
     constexpr int blocks_per_iter = ITER_K / qk;
 
     // kbc == k block continuous, current index in continuous ijk space.
