@@ -5,6 +5,7 @@
 #include "common.h"
 #include "log.h"
 #include "llama-cpp.h"
+#include "llama-memory.h"
 
 #include <algorithm>
 #include <clocale>
@@ -1362,6 +1363,11 @@ static bool test_seq_cp_host(struct llama_model * model, const struct common_par
         return false;
     }
     n_past++;
+
+    // Capture the pre-migration logits; the migration below must not mutate them
+    const int32_t n_vocab = llama_vocab_n_tokens(llama_model_get_vocab(model));
+    std::vector<float> logits_before(n_vocab);
+    memcpy(logits_before.data(), llama_get_logits_ith(ctx.get(), -1), n_vocab * sizeof(float));
 
     // Migrate KV cache from seq 0 to seq 1 (CPU path)
     {

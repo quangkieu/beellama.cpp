@@ -478,7 +478,8 @@ void test_completion_and_count_consistency(const test_ctx & c) {
         {"max_tokens", 5},
     };
     std::vector<raw_buffer> files;
-    const json llama_params = oaicompat_chat_params_parse(body, opt, files);
+    common_chat_session session;
+    const json llama_params = oaicompat_chat_params_parse(c.vocab, body, opt, files, session);
 
     CHECK(llama_params.contains("prompt_parts"));
     CHECK(llama_params.at("prompt_parts").is_array());
