@@ -2047,6 +2047,21 @@ ggml_tensor * llm_graph_context::build_hadamard_input(
     return x;
 }
 
+ggml_tensor * llm_graph_context::build_hadamard_inverse_embd(
+          ggml_tensor * w,
+          ggml_tensor * cur) const {
+    if (!hdmd) {
+        return cur;
+    }
+    if (const auto it = hdmd->inv.find(w); it != hdmd->inv.end()) {
+        cur = llama_mul_mat_hadamard(ctx0, cur, it->second.rot);
+        if (it->second.signs) {
+            cur = ggml_mul(ctx0, cur, it->second.signs);
+        }
+    }
+    return cur;
+}
+
 ggml_tensor * llm_graph_context::build_lora_mm(
           ggml_tensor * w,
           ggml_tensor * cur,
