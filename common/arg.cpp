@@ -1434,6 +1434,34 @@ static utf8_argv make_utf8_argv() {
 }
 #endif
 
+static void parse_kvarn_ushape_floor(common_params & params, const std::string & value) {
+    std::vector<int32_t> numbers;
+    size_t pos = 0;
+    while (pos < value.size()) {
+        if (value[pos] >= '0' && value[pos] <= '9') {
+            size_t end = pos;
+            while (end < value.size() && value[end] >= '0' && value[end] <= '9') {
+                ++end;
+            }
+            numbers.push_back(std::stoi(value.substr(pos, end - pos)));
+            pos = end;
+        } else {
+            ++pos;
+        }
+    }
+    if (numbers.size() != 2) {
+        throw std::invalid_argument(
+                "--kvarn-ushape-bottom requires a K-V pair such as 3-2, 3,2, 3/2 or kvarn3-kvarn2; got: " + value);
+    }
+    for (const int32_t bits : numbers) {
+        if (bits < 2 || bits > 8) {
+            throw std::invalid_argument("--kvarn-ushape-bottom bits must be in [2, 8]; got: " + value);
+        }
+    }
+    params.kvarn.ushape_floor_k = numbers[0];
+    params.kvarn.ushape_floor_v = numbers[1];
+}
+
 static void common_kvarn_pair_normalize(
         ggml_type & cache_type_k,
         ggml_type & cache_type_v,
@@ -1446,11 +1474,15 @@ static void common_kvarn_pair_normalize(
     int32_t value_bits = cache_kvarn_bits_v;
     const uint32_t window_chunk = kvarn.window_chunk;
     const bool ushape = kvarn.ushape;
+    const int32_t ushape_floor_k = kvarn.ushape_floor_k;
+    const int32_t ushape_floor_v = kvarn.ushape_floor_v;
 
     if (key_bits == 0 && value_bits == 0) {
         kvarn = llama_kvarn_default_params();
         kvarn.window_chunk = window_chunk;
         kvarn.ushape = ushape;
+        kvarn.ushape_floor_k = ushape_floor_k;
+        kvarn.ushape_floor_v = ushape_floor_v;
         return;
     }
 
@@ -1473,6 +1505,8 @@ static void common_kvarn_pair_normalize(
     kvarn = llama_kvarn_params_for_type(type);
     kvarn.window_chunk = window_chunk;
     kvarn.ushape = ushape;
+    kvarn.ushape_floor_k = ushape_floor_k;
+    kvarn.ushape_floor_v = ushape_floor_v;
     cache_kvarn_bits_k = key_bits;
     cache_kvarn_bits_v = value_bits;
     cache_type_k = kvarn_fallback_cache_type(key_bits);
@@ -2761,6 +2795,14 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.kvarn.ushape = value;
         }
     ).set_env("LLAMA_ARG_KVARN_USHAPE"));
+    add_opt(common_arg(
+        {"--kvarn-ushape-bottom", "--kvarn-ushape-floor"}, "PAIR",
+        "U-shape ladder bottom K-V pair for KVarN middle layers (default: 3-2)\n"
+        "allowed values: K-V pairs such as 3-2, 3,2, 3/2 or kvarn3-kvarn2",
+        [](common_params & params, const std::string & value) {
+            parse_kvarn_ushape_floor(params, value);
+        }
+    ).set_env("LLAMA_ARG_KVARN_USHAPE_BOTTOM"));
     add_opt(common_arg(
         {"--kv-tail-tokens"}, "SPEC",
         "exact KV-cache tail: 0, auto, N, positional list, or named group list\n"

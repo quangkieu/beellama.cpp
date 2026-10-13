@@ -257,19 +257,24 @@ set_property(CACHE GGML_CUDA_COMPRESSION_MODE PROPERTY STRINGS "none;speed;balan
 # endif()
 # ==============================================================================
 
-# [ACTIVE - Our Shortlist (6 pairs)]:
+# [ACTIVE - Our Shortlist (11 pairs)]:
 set(GGML_CUDA_KVARN_DEFAULT_PAIRS
     k8-v8
+    k8-v6
     k6-v6
+    k6-v5
+    k5-v5
+    k5-v4
     k4-v4
     k4-v3
     k3-v3
+    k3-v2
     k2-v2
 )
 
 list(LENGTH GGML_CUDA_KVARN_DEFAULT_PAIRS GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT)
-if (NOT GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT EQUAL 6)
-    message(FATAL_ERROR "Default KVarN fast decode policy expected 6 pairs, got ${GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT}")
+if (NOT GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT EQUAL 11)
+    message(FATAL_ERROR "Default KVarN fast decode policy expected 11 pairs, got ${GGML_CUDA_KVARN_DEFAULT_PAIR_COUNT}")
 endif()
 set(GGML_CUDA_KVARN_ALL_PAIR_COUNT 36)
 

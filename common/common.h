@@ -364,6 +364,9 @@ struct common_params_speculative_draft {
         /*.sink_tokens         =*/ 128,
         /*.window_chunk        =*/ 2048,
         /*.fail_if_unsupported =*/ true,
+        /*.ushape              =*/ false,
+        /*.ushape_floor_k      =*/ 3,
+        /*.ushape_floor_v      =*/ 2,
     };
 
     common_cpu_params cpuparams;
@@ -683,6 +686,9 @@ struct common_params {
         /*.sink_tokens         =*/ 128,
         /*.window_chunk        =*/ 0,
         /*.fail_if_unsupported =*/ true,
+        /*.ushape              =*/ false,
+        /*.ushape_floor_k      =*/ 3,
+        /*.ushape_floor_v      =*/ 2,
     };
 
     common_conversation_mode conversation_mode = COMMON_CONVERSATION_MODE_AUTO;

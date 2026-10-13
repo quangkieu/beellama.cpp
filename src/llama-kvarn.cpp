@@ -181,7 +181,9 @@ kvarn_bit_pair llama_kvarn_resolve_ushape_pair(
         uint32_t il,
         uint32_t n_layer,
         int user_key_bits,
-        int user_value_bits) {
+        int user_value_bits,
+        int floor_key_bits,
+        int floor_value_bits) {
     uint32_t n_top    = std::max(4u, (uint32_t) std::round(n_layer * 0.05f));
     uint32_t n_bottom = std::max(8u, (uint32_t) std::round(n_layer * 0.15f));
     if (n_top + n_bottom >= n_layer) {
@@ -196,12 +198,18 @@ kvarn_bit_pair llama_kvarn_resolve_ushape_pair(
     std::vector<kvarn_bit_pair> available_pairs;
     available_pairs.push_back({ user_key_bits, user_value_bits });
 
-    const int max_equal = (user_key_bits == user_value_bits)
-        ? user_key_bits - 1
-        : std::min(user_key_bits, user_value_bits);
-    for (int b : { 8, 6, 4, 3, 2 }) {
-        if (b <= max_equal && b >= 2) {
-            available_pairs.push_back({ b, b });
+    static const kvarn_bit_pair ushape_ladder[] = {
+        { 8, 8 }, { 8, 6 }, { 6, 6 }, { 6, 5 }, { 5, 5 }, { 5, 4 }, { 4, 4 },
+        { 4, 3 }, { 3, 3 }, { 3, 2 }, { 2, 2 },
+    };
+    for (const auto & candidate : ushape_ladder) {
+        const bool below_user = candidate.k_bits <= user_key_bits &&
+                                candidate.v_bits <= user_value_bits &&
+                                (candidate.k_bits < user_key_bits || candidate.v_bits < user_value_bits);
+        const bool above_floor = candidate.k_bits >= floor_key_bits &&
+                                 candidate.v_bits >= floor_value_bits;
+        if (below_user && above_floor) {
+            available_pairs.push_back(candidate);
         }
     }
 
@@ -245,6 +253,8 @@ llama_kvarn_params llama_kvarn_default_params() {
         /*.window_chunk        =*/ 0,
         /*.fail_if_unsupported =*/ true,
         /*.ushape              =*/ false,
+        /*.ushape_floor_k      =*/ 3,
+        /*.ushape_floor_v      =*/ 2,
     };
 }
 

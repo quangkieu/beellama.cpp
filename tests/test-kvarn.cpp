@@ -6091,6 +6091,9 @@ static void test_headwide_multistream_store() {
 static void test_ushape_pair_resolution() {
     require(llama_kvarn_default_params().ushape == false,
             "U-shape ladder must be disabled by default");
+    require(llama_kvarn_default_params().ushape_floor_k == 3 &&
+            llama_kvarn_default_params().ushape_floor_v == 2,
+            "U-shape ladder floor must default to kvarn3-kvarn2");
 
     const uint32_t n_layer = 40;
     const int user_k = 4;
@@ -6102,19 +6105,21 @@ static void test_ushape_pair_resolution() {
     const auto bottom = llama_kvarn_resolve_ushape_pair(n_layer - 1, n_layer, user_k, user_v);
     require(bottom.k_bits == user_k && bottom.v_bits == user_v, "bottom edge must keep user KV pair");
 
-    // Middle layers only use the first tier or strictly equal pairs.
+    // Middle layers only walk down to the default floor, never below it.
     for (uint32_t il = 4; il < n_layer - 8; ++il) {
         const auto p = llama_kvarn_resolve_ushape_pair(il, n_layer, user_k, user_v);
-        require((p.k_bits == user_k && p.v_bits == user_v) || (p.k_bits == p.v_bits),
-                "middle layers only use the user pair or a strictly equal pair");
+        require(p.k_bits <= user_k && p.v_bits <= user_v,
+                "middle layers must not exceed the user KV pair");
+        require(p.k_bits >= 3 && p.v_bits >= 2,
+                "middle layers must not go below the default kvarn3-kvarn2 floor");
     }
 
-    // Dead center reaches { 2, 2 }.
+    // Dead center reaches the default { 3, 2 } floor.
     const uint32_t mid_start = 4;
     const uint32_t mid_len = n_layer - 8 - mid_start;
     const uint32_t center = mid_start + mid_len / 2;
     const auto center_pair = llama_kvarn_resolve_ushape_pair(center, n_layer, user_k, user_v);
-    require(center_pair.k_bits == 2 && center_pair.v_bits == 2, "dead center must reach {2,2}");
+    require(center_pair.k_bits == 3 && center_pair.v_bits == 2, "dead center must reach the default {3,2} floor");
 
     // Symmetry across middle layers.
     for (uint32_t i = 0; i < mid_len; ++i) {
@@ -6122,6 +6127,46 @@ static void test_ushape_pair_resolution() {
         const auto b = llama_kvarn_resolve_ushape_pair(mid_start + (mid_len - 1 - i), n_layer, user_k, user_v);
         require(a.k_bits == b.k_bits && a.v_bits == b.v_bits, "middle layers must be symmetric");
     }
+
+    // Custom floor override: 2-2 walks the ladder one step deeper.
+    const auto center_floor_22 = llama_kvarn_resolve_ushape_pair(center, n_layer, user_k, user_v, 2, 2);
+    require(center_floor_22.k_bits == 2 && center_floor_22.v_bits == 2, "floor 2-2 must reach {2,2}");
+
+    // Custom floor override at or above the user pair clamps to the user pair.
+    const auto center_floor_43 = llama_kvarn_resolve_ushape_pair(center, n_layer, user_k, user_v, 4, 3);
+    require(center_floor_43.k_bits == user_k && center_floor_43.v_bits == user_v,
+            "floor at the user pair must clamp to the user pair");
+
+    // Full 11-rung alternating ladder: user 8-8 with floor 2-2 walks every rung.
+    const kvarn_bit_pair ladder11[] = {
+        { 8, 8 }, { 8, 6 }, { 6, 6 }, { 6, 5 }, { 5, 5 }, { 5, 4 }, { 4, 4 },
+        { 4, 3 }, { 3, 3 }, { 3, 2 }, { 2, 2 },
+    };
+    for (uint32_t il = mid_start; il < n_layer - 8; ++il) {
+        const auto p = llama_kvarn_resolve_ushape_pair(il, n_layer, 8, 8, 2, 2);
+        require(p.k_bits <= 8 && p.v_bits <= 8, "8-8 middle layers must not exceed the user KV pair");
+        require(p.k_bits >= 2 && p.v_bits >= 2, "8-8 middle layers must not go below the 2-2 floor");
+    }
+    // Every rung of the 11-pair ladder is reachable from the 8-8 user pair.
+    for (const auto & rung : ladder11) {
+        bool found = false;
+        for (uint32_t il = mid_start; il < n_layer - 8; ++il) {
+            const auto p = llama_kvarn_resolve_ushape_pair(il, n_layer, 8, 8, 2, 2);
+            if (p.k_bits == rung.k_bits && p.v_bits == rung.v_bits) {
+                found = true;
+                break;
+            }
+        }
+        require(found, "11-rung ladder must reach every rung for user 8-8 floor 2-2");
+    }
+    // Dead center of the 8-8 user pair reaches the deepest rung.
+    const auto center_88_floor_22 = llama_kvarn_resolve_ushape_pair(center, n_layer, 8, 8, 2, 2);
+    require(center_88_floor_22.k_bits == 2 && center_88_floor_22.v_bits == 2,
+            "8-8 dead center must reach the {2,2} floor");
+    // Default floor 3-2 stops the 8-8 walk one rung above the bottom.
+    const auto center_88_default = llama_kvarn_resolve_ushape_pair(center, n_layer, 8, 8);
+    require(center_88_default.k_bits == 3 && center_88_default.v_bits == 2,
+            "8-8 dead center must reach the default {3,2} floor");
 
     // Small layer counts guard gracefully without crashing.
     for (uint32_t n : { 12, 8 }) {

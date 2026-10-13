@@ -65,7 +65,9 @@ kvarn_bit_pair llama_kvarn_resolve_ushape_pair(
         uint32_t il,
         uint32_t n_layer,
         int user_key_bits,
-        int user_value_bits);
+        int user_value_bits,
+        int floor_key_bits = 3,
+        int floor_value_bits = 2);
 
 struct llama_kvarn_geometry {
     uint32_t token_group;

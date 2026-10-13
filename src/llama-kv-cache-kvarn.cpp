@@ -1505,7 +1505,8 @@ llama_kv_cache_kvarn::llama_kv_cache_kvarn(
             layer_value_bits = this->params.swa_value_bits;
         } else if (this->params.ushape && !hparams.is_swa(il)) {
             const auto resolved = llama_kvarn_resolve_ushape_pair(
-                    il, hparams.n_layer_all, this->params.key_bits, this->params.value_bits);
+                    il, hparams.n_layer_all, this->params.key_bits, this->params.value_bits,
+                    this->params.ushape_floor_k, this->params.ushape_floor_v);
             layer_key_bits   = resolved.k_bits;
             layer_value_bits = resolved.v_bits;
         }

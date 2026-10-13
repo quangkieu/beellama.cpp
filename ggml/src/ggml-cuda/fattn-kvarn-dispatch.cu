@@ -583,15 +583,20 @@ static inline bool ggml_cuda_fattn_kvarn_fast_decode_pair_enabled(int k_bits, in
 //     } while (0)
 // ==============================================================================
 
-// [ACTIVE - Our Shortlist (6 pairs: 8-8, 6-6, 4-4, 4-3, 3-3, 2-2)]:
+// [ACTIVE - Our Shortlist (11 pairs: 8-8, 8-6, 6-6, 6-5, 5-5, 5-4, 4-4, 4-3, 3-3, 3-2, 2-2)]:
 #define GGML_CUDA_FATTN_KVARN_FAST_DECODE_DISPATCH_K(DISPATCH_PAIR) \
     do { \
         switch (plan.k.bits) { \
-            case 8: if (plan.v.bits == 8) { DISPATCH_PAIR(8, 8); } else { return false; } break; \
-            case 6: if (plan.v.bits == 6) { DISPATCH_PAIR(6, 6); } else { return false; } break; \
+            case 8: switch (plan.v.bits) { \
+                case 8: DISPATCH_PAIR(8, 8); break; case 6: DISPATCH_PAIR(8, 6); break; default: return false; } break; \
+            case 6: switch (plan.v.bits) { \
+                case 6: DISPATCH_PAIR(6, 6); break; case 5: DISPATCH_PAIR(6, 5); break; default: return false; } break; \
+            case 5: switch (plan.v.bits) { \
+                case 5: DISPATCH_PAIR(5, 5); break; case 4: DISPATCH_PAIR(5, 4); break; default: return false; } break; \
             case 4: switch (plan.v.bits) { \
                 case 4: DISPATCH_PAIR(4, 4); break; case 3: DISPATCH_PAIR(4, 3); break; default: return false; } break; \
-            case 3: if (plan.v.bits == 3) { DISPATCH_PAIR(3, 3); } else { return false; } break; \
+            case 3: switch (plan.v.bits) { \
+                case 3: DISPATCH_PAIR(3, 3); break; case 2: DISPATCH_PAIR(3, 2); break; default: return false; } break; \
             case 2: if (plan.v.bits == 2) { DISPATCH_PAIR(2, 2); } else { return false; } break; \
             default: return false; \
         } \

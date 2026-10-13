@@ -235,6 +235,8 @@ extern "C" {
         uint32_t window_chunk; // CUDA prefill materialization window; 0 = environment/default
         bool     fail_if_unsupported;
         bool     ushape;       // U-shape layer-adaptive KV cache quantization ladder; default disabled
+        int32_t  ushape_floor_k; // U-shape ladder bottom K bits; default 3
+        int32_t  ushape_floor_v; // U-shape ladder bottom V bits; default 2
     };
 
     LLAMA_API const char *              llama_kvarn_type_name       (enum llama_kvarn_type type);
